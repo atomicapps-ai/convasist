@@ -26,8 +26,9 @@ Prereqs:
 
 1. **VS 2022 Build Tools** with the *Desktop development with C++* workload (MSVC + CMake — whisper.cpp needs both): `winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"`
 2. **Rust**: `winget install --id Rustlang.Rustup -e` (defaults: stable, MSVC host)
-3. **LLVM** — whisper-rs's bindgen needs `libclang.dll`: `winget install --id LLVM.LLVM -e`, then set `LIBCLANG_PATH` once: `[Environment]::SetEnvironmentVariable("LIBCLANG_PATH", "C:\Program Files\LLVM\bin", "User")` (new terminals inherit it)
-4. **Node 22+**
+3. **CMake on PATH** — the VS-bundled CMake is not on PATH; install standalone: `winget install --id Kitware.CMake -e`
+4. **LLVM 18.x** — whisper-rs's bindgen needs `libclang.dll`, and LLVM 20+ generates broken bindings (compile-time layout assert). Install 18.1.8: https://github.com/llvm/llvm-project/releases/download/llvmorg-18.1.8/LLVM-18.1.8-win64.exe — then set `LIBCLANG_PATH` once: `[Environment]::SetEnvironmentVariable("LIBCLANG_PATH", "C:\Program Files\LLVM\bin", "User")` (new terminals inherit it)
+5. **Node 22.12+**
 
 WebView2 is preinstalled on Windows 11. Open a fresh terminal after installs so PATH changes apply. See also the [Tauri 2 Windows prerequisites](https://tauri.app/start/prerequisites/).
 
