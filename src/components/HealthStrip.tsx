@@ -53,7 +53,17 @@ export function HealthStrip() {
   const levels = useTranscriptStore((s) => s.levels);
   const segments = useTranscriptStore((s) => s.segments);
   const config = useAppStore((s) => s.config);
+
+  // Latency readout (U10 lite): last decode + rolling average of the last
+  // 10 finalized segments.
+  const finals = segments.filter((s) => s.is_final).slice(-10);
   const lastLatency = segments[segments.length - 1]?.latency_ms;
+  const avgLatency =
+    finals.length > 0
+      ? Math.round(
+          finals.reduce((sum, s) => sum + s.latency_ms, 0) / finals.length,
+        )
+      : undefined;
 
   return (
     <footer className="flex h-8 shrink-0 items-center gap-4 border-t border-border bg-panel px-4">
@@ -61,7 +71,8 @@ export function HealthStrip() {
       <Meter side="inbound" label="system" level={levels.inbound} />
       <span className="ml-auto font-mono text-[11px] text-fg-faint">
         whisper {config?.whisper_model ?? "…"}
-        {lastLatency !== undefined ? ` · ${lastLatency}ms decode` : ""}
+        {lastLatency !== undefined ? ` · ${lastLatency}ms` : ""}
+        {avgLatency !== undefined ? ` · avg ${avgLatency}ms` : ""}
       </span>
     </footer>
   );

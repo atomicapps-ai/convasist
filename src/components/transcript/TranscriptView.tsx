@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { TranscriptSegment } from "@/lib/ipc";
+import { useAppStore } from "@/state/app";
 import { useTranscriptStore } from "@/state/transcript";
 
 function SegmentBubble({ segment }: { segment: TranscriptSegment }) {
@@ -97,9 +98,30 @@ function Column({
   );
 }
 
-/** Dual-column live transcript: THEM (inbound) left, YOU (outbound) right. */
+/**
+ * Live transcript. Default: dual columns — THEM (inbound) left, YOU
+ * (outbound) right. Sidecar mode (U9): one merged chronological feed
+ * (bubble alignment still distinguishes the sides) that fits a 380 px
+ * strip.
+ */
 export function TranscriptView() {
   const segments = useTranscriptStore((s) => s.segments);
+  const sidecar = useAppStore((s) => s.sidecar);
+
+  if (sidecar) {
+    const merged = [...segments].sort((a, b) => a.start_ms - b.start_ms);
+    return (
+      <main className="flex min-h-0 flex-1">
+        <Column
+          title="Conversation"
+          accentClass="text-fg-muted"
+          segments={merged}
+          emptyHint="Both sides of the conversation appear here."
+        />
+      </main>
+    );
+  }
+
   const inbound = segments.filter((s) => s.side === "inbound");
   const outbound = segments.filter((s) => s.side === "outbound");
 

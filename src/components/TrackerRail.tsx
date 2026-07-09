@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { useAppStore } from "@/state/app";
 import { useAssistStore } from "@/state/assist";
 
 /**
@@ -8,8 +9,11 @@ import { useAssistStore } from "@/state/assist";
  */
 export function TrackerRail() {
   const tracker = useAssistStore((s) => s.tracker);
+  const sidecar = useAppStore((s) => s.sidecar);
   const [collapsed, setCollapsed] = useState(false);
 
+  // No room in the 380 px sidecar strip.
+  if (sidecar) return null;
   if (!tracker || (tracker.entities.length === 0 && tracker.commitments.length === 0)) {
     return null;
   }

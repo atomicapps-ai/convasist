@@ -28,6 +28,9 @@ interface AppState {
   registry: ProviderInfo[];
   keyStatus: Partial<Record<ProviderId, boolean>>;
   refreshKeyStatus: () => Promise<void>;
+  /** Sidecar mode (U9): narrow always-on-top strip beside a call window. */
+  sidecar: boolean;
+  toggleSidecar: () => Promise<void>;
 
   init: () => Promise<void>;
   updateConfig: (patch: Partial<AppConfig>) => Promise<void>;
@@ -56,6 +59,17 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   registry: [],
   keyStatus: {},
+  sidecar: false,
+  toggleSidecar: async () => {
+    const next = !get().sidecar;
+    set({ sidecar: next });
+    try {
+      const { applySidecar } = await import("@/lib/sidecar");
+      await applySidecar(next);
+    } catch (e) {
+      set({ sidecar: !next, lastError: String(e) });
+    }
+  },
   refreshKeyStatus: async () => {
     const statuses = await providerKeyStatus();
     set({

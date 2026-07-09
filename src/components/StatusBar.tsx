@@ -12,6 +12,8 @@ export function StatusBar({
   onToggleSessions: () => void;
 }) {
   const session = useTranscriptStore((s) => s.session);
+  const sidecar = useAppStore((s) => s.sidecar);
+  const toggleSidecar = useAppStore((s) => s.toggleSidecar);
   const busy = useAppStore((s) => s.busy);
   const lastError = useAppStore((s) => s.lastError);
   const modelStatus = useAppStore((s) => s.modelStatus);
@@ -83,6 +85,19 @@ export function StatusBar({
             ].join(" ")}
           >
             {listening ? "Stop" : "Start listening"}
+          </button>
+          <button
+            type="button"
+            onClick={() => void toggleSidecar()}
+            aria-pressed={sidecar}
+            aria-label="Toggle sidecar mode (narrow always-on-top)"
+            className={`rounded-md border px-2 py-1 text-xs ${
+              sidecar
+                ? "border-ai/50 text-ai"
+                : "border-border text-fg-muted hover:text-fg"
+            }`}
+          >
+            Sidecar
           </button>
           <button
             type="button"
