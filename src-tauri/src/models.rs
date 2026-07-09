@@ -118,8 +118,7 @@ fn download(app: &AppHandle, model: &str) -> Result<(), CoreError> {
         file.write_all(&buf[..n])
             .map_err(|e| CoreError::Asr(e.to_string()))?;
         written += n as u64;
-        if total > 0 {
-            let percent = ((written * 100) / total).min(100) as u8;
+        if let Some(percent) = (written * 100).checked_div(total).map(|p| p.min(100) as u8) {
             if percent != last_percent {
                 last_percent = percent;
                 let _ = app.emit(
