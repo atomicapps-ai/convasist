@@ -43,4 +43,6 @@ CI runs all three on every PR (`.github/workflows/ci.yml`); the shell job runs o
 
 ## Status
 
-Phase 1, milestone **M0 (scaffold)** complete: workspace, typed IPC contract (`crates/convasist-core/src/ipc.rs` mirrored by `src/lib/ipc.ts` — change both in the same commit), provider registry with Claude default, config persistence, session-lifecycle stubs, Operator-theme UI shell. Next: **M1 — WASAPI dual capture + VU meters + device hot-swap** (see design §8).
+Phase 1, milestone **M1 (dual capture)** complete: real mic + system-loopback capture via cpal/WASAPI (device callback → lock-free ring → worker thread → 16 kHz mono frames), live VU meters, stall watchdog, reopen-on-error hot-swap, device picker, and the §7.1 consent gate (UI + shell both enforce it). M0 laid the workspace, typed IPC contract (`crates/convasist-core/src/ipc.rs` mirrored by `src/lib/ipc.ts` — change both in the same commit), and provider registry with Claude default. Next: **M2 — streaming transcription into the dual-column UI** (see design §8).
+
+Real capture requires Windows — on other platforms sessions fail to start (loopback is WASAPI-only). See the design doc §2.4 for the threading contract the audio code follows.

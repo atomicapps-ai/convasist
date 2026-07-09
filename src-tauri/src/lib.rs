@@ -1,22 +1,27 @@
 //! convasist Tauri shell — wires the UI to the core layers.
 //!
-//! M0 scope: config persistence, provider registry exposure, and session
-//! lifecycle stubs that exercise the full typed IPC path end-to-end. Real
-//! capture (M1) and ASR (M2) replace the stub internals without changing
-//! any command or event signature.
+//! M1 state: real dual capture (mic + WASAPI loopback) with VU meters,
+//! stall watchdog, and reopen-on-error hot-swap. ASR attaches to the frame
+//! path in M2 without changing any command or event signature.
+
+mod audio;
+mod session;
 
 use std::fs;
 use std::sync::Mutex;
 
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Manager, State};
 
+use convasist_core::audio::AudioDevice;
 use convasist_core::config::AppConfig;
-use convasist_core::ipc::{events, SessionStateEvent};
 use convasist_core::llm::{provider_registry, ProviderInfo};
+
+use session::SessionManager;
 
 /// In-memory app state; the config mirrors the JSON file on disk.
 struct AppState {
     config: Mutex<AppConfig>,
+    session: SessionManager,
 }
 
 fn config_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
@@ -61,37 +66,26 @@ fn get_provider_registry() -> Vec<ProviderInfo> {
     provider_registry()
 }
 
-/// M1 replaces the stub internals with real WASAPI capture start.
+#[tauri::command]
+fn list_audio_devices() -> Vec<AudioDevice> {
+    audio::list_devices()
+}
+
 #[tauri::command]
 fn start_session(app: AppHandle, state: State<AppState>) -> Result<String, String> {
-    let config = state.config.lock().expect("config lock");
+    let config = state.config.lock().expect("config lock").clone();
     if !config.consent_acknowledged {
         return Err("consent_required".into());
     }
-    let session_id = format!("session-{}", std::process::id());
-    app.emit(
-        events::SESSION_STATE,
-        SessionStateEvent::Listening {
-            session_id: session_id.clone(),
-            started_at_unix_ms: now_unix_ms(),
-        },
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(session_id)
-}
-
-#[tauri::command]
-fn stop_session(app: AppHandle) -> Result<(), String> {
-    app.emit(events::SESSION_STATE, SessionStateEvent::Idle)
+    state
+        .session
+        .start(&app, &config)
         .map_err(|e| e.to_string())
 }
 
-fn now_unix_ms() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+#[tauri::command]
+fn stop_session(app: AppHandle, state: State<AppState>) -> Result<(), String> {
+    state.session.stop(&app).map_err(|e| e.to_string())
 }
 
 pub fn run() {
@@ -100,6 +94,7 @@ pub fn run() {
             let config = load_config(app.handle());
             app.manage(AppState {
                 config: Mutex::new(config),
+                session: SessionManager::new(),
             });
             Ok(())
         })
@@ -107,6 +102,7 @@ pub fn run() {
             get_config,
             save_config,
             get_provider_registry,
+            list_audio_devices,
             start_session,
             stop_session,
         ])

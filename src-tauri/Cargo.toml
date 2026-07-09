@@ -22,3 +22,9 @@ convasist-core = { path = "../crates/convasist-core" }
 tauri = { version = "2", features = [] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# Capture: cpal speaks WASAPI on Windows, including loopback (an input
+# stream built on an output device). Design §2.3.
+cpal = "0.16"
+# Lock-free SPSC ring between the device callback and the worker thread
+# (§2.4 rule 1: callbacks only copy into a ring buffer).
+rtrb = "0.3"

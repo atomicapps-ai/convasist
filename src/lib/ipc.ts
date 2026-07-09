@@ -73,6 +73,16 @@ export interface AppConfig {
   llm_quality: ModelSelection;
   llm_fast: ModelSelection | null;
   consent_acknowledged: boolean;
+  input_device: string | null;
+  loopback_device: string | null;
+}
+
+/** Mirror of convasist-core audio::AudioDevice. */
+export interface AudioDevice {
+  id: string;
+  name: string;
+  side: StreamSide;
+  is_default: boolean;
 }
 
 /** True when running inside the Tauri shell (vs a plain browser dev tab). */

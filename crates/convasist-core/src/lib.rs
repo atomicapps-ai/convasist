@@ -12,6 +12,7 @@
 pub mod asr;
 pub mod audio;
 pub mod config;
+pub mod dsp;
 pub mod error;
 pub mod ipc;
 pub mod llm;

@@ -23,6 +23,11 @@ pub struct AppConfig {
     /// User acknowledged the recording-consent notice (§7.1). The app will
     /// not start a capture session while this is false.
     pub consent_acknowledged: bool,
+    /// Preferred microphone device name (`None` = system default; A3).
+    pub input_device: Option<String>,
+    /// Preferred loopback source — an OUTPUT device whose playback is
+    /// captured (`None` = default output; A2/A3).
+    pub loopback_device: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -44,6 +49,8 @@ impl Default for AppConfig {
                 model: default_provider.default_fast_model.to_string(),
             }),
             consent_acknowledged: false,
+            input_device: None,
+            loopback_device: None,
         }
     }
 }
