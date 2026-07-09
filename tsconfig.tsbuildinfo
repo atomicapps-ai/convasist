@@ -1,0 +1,1 @@
+{"root":["./src/App.tsx","./src/main.tsx","./src/components/AssistDock.tsx","./src/components/HealthStrip.tsx","./src/components/StatusBar.tsx","./src/components/transcript/TranscriptView.tsx","./src/lib/ipc.ts","./src/lib/useIpcBridge.ts","./src/state/transcript.ts"],"version":"5.9.3"}

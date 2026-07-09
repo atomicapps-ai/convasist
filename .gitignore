@@ -1,0 +1,21 @@
+# Node
+node_modules/
+dist/
+
+# Rust
+target/
+
+# Models are fetched on first run, never committed
+models/
+
+# Env / secrets
+.env
+.env.*
+
+# Editor/OS noise
+.DS_Store
+Thumbs.db
+*.log
+
+# Tauri generated artifacts
+src-tauri/gen/

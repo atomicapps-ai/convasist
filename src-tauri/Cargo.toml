@@ -1,0 +1,24 @@
+[package]
+name = "convasist-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "convasist — real-time AI conversation assistant (Tauri shell)"
+
+# Windows is the Phase 1 target (design §9 row 4). This crate needs a desktop
+# GUI toolchain; CI builds it on windows-latest. The pure-logic core builds
+# everywhere.
+
+[lib]
+name = "convasist_app"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+convasist-core = { path = "../crates/convasist-core" }
+tauri = { version = "2", features = [] }
+serde = { workspace = true }
+serde_json = { workspace = true }
