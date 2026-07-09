@@ -23,7 +23,7 @@ convasist is a real-time AI conversation assistant that listens to both sides of
 | VAD | Silero VAD via ONNX Runtime | ~1 ms per frame; gates ASR so silence costs nothing |
 | RAG embeddings | `fastembed` (BGE-small-en-v1.5, 384-dim, local CPU) | <5 ms query embedding, no API key, no network |
 | Vector store | **LanceDB** (embedded, in-process) | Rust-native, hybrid vector+FTS search, zero server to run |
-| LLM | **Claude API, streaming** (`claude-sonnet-5` default; `claude-haiku-4-5` for cheap proactive suggestions) | Best quality per token; streaming keeps perceived latency <500 ms to first word |
+| LLM | **Provider-agnostic `LlmProvider` abstraction — user picks provider + model via dropdowns; default: Claude** (`claude-sonnet-5` quality slot, `claude-haiku-4-5` fast slot) | Owner decision 2026-07-09: any AI must be configurable. Top-5 provider registry (§4.6); streaming everywhere keeps perceived latency <500 ms to first word |
 
 **Realistic latency budget (mic → text on screen):** ~300–700 ms for partial transcripts, 1–2 s for finalized text. Breakdown and tuning levers in §2.5. Anyone promising "near-zero" end-to-end speech-to-text is ignoring physics — the design instead makes every stage measurable and puts a hard number on each.
 
@@ -85,7 +85,7 @@ Phase 1 requires capturing **two** streams:
 | Embeddings | `fastembed` (BGE-small-en-v1.5) | Local, CPU, 384-dim; ~4 ms/query, ~1k chunks/min ingest |
 | Vector store | `lancedb` (embedded) | ANN + full-text hybrid, versioned, single data dir; no server process |
 | Document parsing | `pdfium-render` (PDF), `docx-rs`, plain md/txt/html | Runs on a background ingestion worker, never the audio path |
-| LLM client | `anthropic` SDK / raw `reqwest` SSE streaming | Streaming always; `claude-sonnet-5` for on-demand assists, `claude-haiku-4-5` for high-frequency proactive suggestions |
+| LLM client | **`LlmProvider` trait + provider registry** — one `reqwest` SSE streaming client per provider, normalized to a common token stream | Provider + model chosen in Settings dropdowns (§4.6); default Anthropic Claude. Every provider implementation is ~one file; adding a sixth provider never touches the orchestrator |
 | Async runtime | `tokio` | I/O only — audio DSP stays on dedicated OS threads, never on the async executor |
 
 **UI (TypeScript, `src/`):** React 19, Tailwind CSS 4, shadcn/ui primitives, Zustand for transcript state, `@tauri-apps/api` events/channels for the stream. Virtualized transcript list (`virtua`) so a 3-hour conversation scrolls at 60fps.
@@ -161,7 +161,7 @@ Five modules, each behind a trait/interface so implementations swap without touc
 | **Transcription Layer** | Utterance chunking, ASR engines, partial/final lifecycle | `TranscriptionEngine` trait → `TranscriptEvent { stream, seq, text, is_final, t_start, t_end, latency }` |
 | **UI Layer** | Dual-column transcript, assist surfaces, RAG library, settings, hotkeys | Consumes typed IPC events; issues typed commands (`start/stop`, `assist(scope)`, `ingest(paths)`) |
 | **RAG / Vector Layer** | Ingestion pipeline, chunking, embeddings, LanceDB store, hybrid retriever | `retrieve(query, k) → Vec<ScoredChunk>`; `ingest(doc) → IngestReport` |
-| **AI Orchestration Layer** | Context assembly (transcript window + RAG hits + pinned facts), prompt templates, Claude streaming, trigger policy (manual/proactive) | `assist(request) → token stream`; emits `SuggestionEvent`s |
+| **AI Orchestration Layer** | Context assembly (transcript window + RAG hits + pinned facts), prompt templates, **LLM provider registry** (pluggable providers, streaming), trigger policy (manual/proactive) | `assist(request) → token stream`; emits `SuggestionEvent`s; `LlmProvider` trait per provider |
 
 Everything persists locally: transcripts + sessions in SQLite, vectors in LanceDB, documents in an app-data folder. **No audio or transcript leaves the machine unless cloud ASR or the LLM call is invoked** — and the LLM call sends text context only, never audio.
 
@@ -209,7 +209,7 @@ Legend: **[C]** core — Phase 1 ships with it; **[S]** stretch — in scope if 
 | U4 | AI assist surface: select any message(s) → "Ask AI"; global hotkey for "assist on last exchange"; streamed answer cards | C |
 | U5 | RAG library screen: drag-drop upload, ingest progress, per-doc enable/disable toggle, delete | C |
 | U6 | In-session transcript search + full-text search across past sessions | C |
-| U7 | Settings: devices, ASR engine/model, API keys, theme, hotkeys, privacy (cloud on/off) | C |
+| U7 | Settings: devices, ASR engine/model, **AI provider + model dropdowns (§4.6)**, per-provider API keys, theme, hotkeys, privacy (cloud on/off) | C |
 | U8 | Export session (Markdown / JSON) | C |
 | U9 | Always-on-top compact mode ("sidecar" strip next to the call window) | S |
 | U10 | Latency HUD (per-stage pipeline timings, live) | S |
@@ -234,9 +234,36 @@ Legend: **[C]** core — Phase 1 ships with it; **[S]** stretch — in scope if 
 | O1 | Context builder: rolling transcript window (both streams, interleaved by time) + top-k RAG chunks + session metadata, under a strict token budget | C |
 | O2 | Manual assist: on-demand, scoped to selection / last exchange / whole session; streaming render | C |
 | O3 | Prompt template library (answer suggestion, explain jargon, summarize-so-far, draft follow-up) — user-editable | C |
-| O4 | Model routing: sonnet for on-demand, haiku for proactive/cheap paths; per-request override | C |
+| O4 | Two-slot model routing: a **quality slot** (on-demand assists) and a **fast slot** (proactive/cheap paths), each independently set to any provider+model; per-request override | C |
+| O7 | Provider-agnostic `LlmProvider` abstraction + top-5 provider registry with Claude default (§4.6) | C |
 | O5 | Proactive triggers (see §6) with debounce + cooldown so suggestions never flood | S |
 | O6 | Tool-use loop (let the model call `retrieve` itself for multi-hop questions) | D |
+
+### 4.6 AI provider abstraction — any AI, Claude by default
+
+**Owner decision (2026-07-09):** the UI must support configuring any AI, defaulting to Claude, with dropdowns to pick the provider and the model.
+
+**Rust side:** a single `LlmProvider` trait (`stream_completion(request) → token stream`, `list_models()`, `validate_key()`) with one implementation file per provider, registered in a provider registry. All providers speak SSE streaming normalized to one internal token-stream type, so the orchestrator (§4.5) is 100% provider-blind. Adding provider #6 = one new file + one registry line.
+
+**Launch registry — top 5 providers:**
+
+| # | Provider | Curated models (quality / fast slots) | Notes |
+|---|---|---|---|
+| 1 | **Anthropic Claude** — DEFAULT | `claude-sonnet-5` / `claude-haiku-4-5` | Ships pre-selected; first-run works the moment a key is pasted |
+| 2 | OpenAI | `gpt-5.2` / `gpt-5-mini` | OpenAI-compatible SSE schema is also the fallback adapter for any custom endpoint |
+| 3 | Google Gemini | `gemini-3-pro` / `gemini-3-flash` | |
+| 4 | xAI Grok | `grok-4` / `grok-4-fast` | OpenAI-compatible API |
+| 5 | DeepSeek | `deepseek-chat` / `deepseek-chat` | Lowest cost per token of the five |
+| — | Local / Ollama **[S]** | whatever the user has pulled | Stretch: fully-offline option; uses the OpenAI-compatible adapter against `localhost:11434` |
+
+Model lists are fetched live from each provider's `/models` endpoint where offered (with the curated defaults as fallback), so new models appear in the dropdown without an app update.
+
+**Settings UX:**
+
+- **Provider dropdown → dependent Model dropdown** (repeated twice: one pair for the *quality* slot, one for the *fast* slot — O4; a "same as quality" toggle collapses them for users who don't care).
+- **Per-provider API key** fields, stored in the **OS credential vault** (Windows Credential Manager / macOS Keychain via the `keyring` crate) — never in a plaintext config file.
+- **Test button** per provider: one round-trip that validates the key and shows measured first-token latency, so the user can compare providers empirically before a live call.
+- Switching provider/model takes effect on the next AI request — no restart, active streams finish on the old selection.
 
 ---
 
@@ -349,7 +376,7 @@ Each milestone is independently demoable; M1 is deliberately the riskiest slice 
 |---|---|---|---|
 | 1 | Approve shell/stack | Tauri 2 / Electron+Rust / other | **Tauri 2** (§2.2) |
 | 2 | Default ASR posture | Local whisper / cloud Deepgram / trait+both | **Trait + local default, cloud opt-in** (§2.3) |
-| 3 | LLM provider | Claude API / local LLM / both | **Claude API streaming** (local LLM deferred) |
+| 3 | LLM provider | ~~Claude only / multi-provider~~ | ✅ **DECIDED 2026-07-09: provider-agnostic, Claude default, top-5 registry + provider/model dropdowns (§4.6)** |
 | 4 | Phase 1 OS scope | Windows-only / Win+macOS | **Windows-only**, macOS 1.5 (§7.7) |
 | 5 | Visual direction | a Operator / b Paper / c Radar (§5.3) | **a — Operator** |
 | 6 | Enhancement picks | §6.1–6.4 | **6.2 + 6.3 core, 6.1 stretch, 6.4 next** |
