@@ -22,7 +22,14 @@ convasist/
 
 ## Development (Windows)
 
-Prereqs: [Rust](https://rustup.rs), Node 22+, [Tauri 2 Windows prerequisites](https://tauri.app/start/prerequisites/) (WebView2 is preinstalled on Windows 11).
+Prereqs:
+
+1. **VS 2022 Build Tools** with the *Desktop development with C++* workload (MSVC + CMake — whisper.cpp needs both): `winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"`
+2. **Rust**: `winget install --id Rustlang.Rustup -e` (defaults: stable, MSVC host)
+3. **LLVM** — whisper-rs's bindgen needs `libclang.dll`: `winget install --id LLVM.LLVM -e`, then set `LIBCLANG_PATH` once: `[Environment]::SetEnvironmentVariable("LIBCLANG_PATH", "C:\Program Files\LLVM\bin", "User")` (new terminals inherit it)
+4. **Node 22+**
+
+WebView2 is preinstalled on Windows 11. Open a fresh terminal after installs so PATH changes apply. See also the [Tauri 2 Windows prerequisites](https://tauri.app/start/prerequisites/).
 
 ```powershell
 npm install
