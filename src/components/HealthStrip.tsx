@@ -1,4 +1,5 @@
 import type { AudioLevelEvent, StreamSide } from "@/lib/ipc";
+import { useAppStore } from "@/state/app";
 import { useTranscriptStore } from "@/state/transcript";
 
 /** Map dBFS [-60, 0] onto a 0–100% meter width. */
@@ -50,12 +51,17 @@ function Meter({
 /** Bottom health strip: VU meters + stall warnings (design §5.2, A4). */
 export function HealthStrip() {
   const levels = useTranscriptStore((s) => s.levels);
+  const segments = useTranscriptStore((s) => s.segments);
+  const config = useAppStore((s) => s.config);
+  const lastLatency = segments[segments.length - 1]?.latency_ms;
+
   return (
     <footer className="flex h-8 shrink-0 items-center gap-4 border-t border-border bg-panel px-4">
       <Meter side="outbound" label="mic" level={levels.outbound} />
       <Meter side="inbound" label="system" level={levels.inbound} />
       <span className="ml-auto font-mono text-[11px] text-fg-faint">
-        capture ✓ · asr M2
+        whisper {config?.whisper_model ?? "…"}
+        {lastLatency !== undefined ? ` · ${lastLatency}ms decode` : ""}
       </span>
     </footer>
   );

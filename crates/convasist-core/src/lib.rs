@@ -17,5 +17,6 @@ pub mod error;
 pub mod ipc;
 pub mod llm;
 pub mod rag;
+pub mod vad;
 
 pub use error::CoreError;

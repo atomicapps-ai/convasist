@@ -20,6 +20,8 @@ pub mod events {
     pub const SESSION_STATE: &str = "convasist://session-state";
     /// Payload: [`super::AssistChunkEvent`]
     pub const ASSIST_CHUNK: &str = "convasist://assist-chunk";
+    /// Payload: [`super::ModelStatusEvent`]
+    pub const MODEL_STATUS: &str = "convasist://model-status";
 }
 
 /// Re-exported so the IPC module is a one-stop description of the wire.
@@ -50,6 +52,15 @@ pub enum SessionStateEvent {
     Error {
         message: String,
     },
+}
+
+/// ASR model provisioning progress (T6 first-run downloader).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "state")]
+pub enum ModelStatusEvent {
+    Downloading { model: String, percent: u8 },
+    Ready { model: String },
+    Error { model: String, message: String },
 }
 
 /// One streamed piece of an AI assist answer (U4/O2).

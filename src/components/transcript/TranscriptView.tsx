@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from "react";
+
 import type { TranscriptSegment } from "@/lib/ipc";
 import { useTranscriptStore } from "@/state/transcript";
 
@@ -41,14 +43,34 @@ function Column({
   segments: TranscriptSegment[];
   emptyHint: string;
 }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // Smart auto-scroll (U2): follow the live edge unless the user scrolled up.
+  const [pinned, setPinned] = useState(true);
+  const lastSegment = segments[segments.length - 1];
+
+  useEffect(() => {
+    if (pinned && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [pinned, lastSegment]);
+
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    setPinned(atBottom);
+  };
+
   return (
-    <section className="flex min-w-0 flex-1 flex-col">
+    <section className="relative flex min-w-0 flex-1 flex-col">
       <h2
         className={`shrink-0 px-4 py-2 text-xs font-semibold uppercase tracking-widest ${accentClass}`}
       >
         {title}
       </h2>
       <div
+        ref={scrollRef}
+        onScroll={onScroll}
         className="flex flex-1 flex-col gap-2 overflow-y-auto px-4 pb-4"
         role="log"
         aria-live="polite"
@@ -62,6 +84,15 @@ function Column({
           ))
         )}
       </div>
+      {!pinned && (
+        <button
+          type="button"
+          onClick={() => setPinned(true)}
+          className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full border border-border bg-panel px-3 py-1 text-[11px] text-fg-muted shadow hover:text-fg"
+        >
+          ↓ Jump to live
+        </button>
+      )}
     </section>
   );
 }
@@ -78,14 +109,14 @@ export function TranscriptView() {
         title="Them · system audio"
         accentClass="text-inbound"
         segments={inbound}
-        emptyHint="Inbound transcription appears here once a session starts (M2)."
+        emptyHint="What you hear (calls, videos, any app audio) is transcribed here."
       />
       <div className="w-px shrink-0 bg-border" aria-hidden />
       <Column
         title="You · microphone"
         accentClass="text-outbound"
         segments={outbound}
-        emptyHint="Your side of the conversation appears here (M2)."
+        emptyHint="What you say into the microphone is transcribed here."
       />
     </main>
   );

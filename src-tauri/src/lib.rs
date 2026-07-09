@@ -1,10 +1,12 @@
 //! convasist Tauri shell — wires the UI to the core layers.
 //!
-//! M1 state: real dual capture (mic + WASAPI loopback) with VU meters,
-//! stall watchdog, and reopen-on-error hot-swap. ASR attaches to the frame
-//! path in M2 without changing any command or event signature.
+//! M2 state: dual capture (mic + WASAPI loopback) feeding per-side
+//! whisper.cpp engines — live partial/final transcript segments stream to
+//! the dual-column UI. The model auto-downloads on first start (T6).
 
+mod asr;
 mod audio;
+mod models;
 mod session;
 
 use std::fs;
@@ -71,8 +73,10 @@ fn list_audio_devices() -> Vec<AudioDevice> {
     audio::list_devices()
 }
 
+// Async commands run off the main thread — model load (~1 s) and session
+// teardown must never freeze the UI.
 #[tauri::command]
-fn start_session(app: AppHandle, state: State<AppState>) -> Result<String, String> {
+async fn start_session(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
     let config = state.config.lock().expect("config lock").clone();
     if !config.consent_acknowledged {
         return Err("consent_required".into());
@@ -84,7 +88,7 @@ fn start_session(app: AppHandle, state: State<AppState>) -> Result<String, Strin
 }
 
 #[tauri::command]
-fn stop_session(app: AppHandle, state: State<AppState>) -> Result<(), String> {
+async fn stop_session(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     state.session.stop(&app).map_err(|e| e.to_string())
 }
 

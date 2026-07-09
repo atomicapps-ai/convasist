@@ -7,13 +7,20 @@ import {
   startSession,
   stopSession,
 } from "@/lib/commands";
-import { isTauri, type AppConfig, type AudioDevice } from "@/lib/ipc";
+import {
+  isTauri,
+  type AppConfig,
+  type AudioDevice,
+  type ModelStatusEvent,
+} from "@/lib/ipc";
 
 interface AppState {
   config: AppConfig | null;
   devices: AudioDevice[];
   busy: boolean;
   lastError: string | null;
+  modelStatus: ModelStatusEvent | null;
+  setModelStatus: (status: ModelStatusEvent) => void;
 
   init: () => Promise<void>;
   updateConfig: (patch: Partial<AppConfig>) => Promise<void>;
@@ -27,6 +34,18 @@ export const useAppStore = create<AppState>((set, get) => ({
   devices: [],
   busy: false,
   lastError: null,
+  modelStatus: null,
+  setModelStatus: (status) => {
+    // A finished download clears the "model_downloading" start error.
+    set((s) => ({
+      modelStatus: status,
+      lastError:
+        status.state === "ready" &&
+        s.lastError?.includes("model_downloading")
+          ? null
+          : s.lastError,
+    }));
+  },
 
   init: async () => {
     if (!isTauri()) return;

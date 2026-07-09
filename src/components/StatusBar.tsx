@@ -10,9 +10,35 @@ export function StatusBar({
   const session = useTranscriptStore((s) => s.session);
   const busy = useAppStore((s) => s.busy);
   const lastError = useAppStore((s) => s.lastError);
+  const modelStatus = useAppStore((s) => s.modelStatus);
   const start = useAppStore((s) => s.start);
   const stop = useAppStore((s) => s.stop);
   const listening = session.state === "listening";
+
+  const statusText = (() => {
+    if (modelStatus?.state === "downloading") {
+      return `Downloading speech model ${modelStatus.model}… ${modelStatus.percent}%`;
+    }
+    if (modelStatus?.state === "error") {
+      return `Model download failed: ${modelStatus.message}`;
+    }
+    if (lastError === "consent_required") {
+      return "Acknowledge the consent notice first.";
+    }
+    if (lastError?.includes("model_downloading")) {
+      return "Fetching the speech model — Start again when it's ready.";
+    }
+    if (session.state === "error") return session.message;
+    if (modelStatus?.state === "ready" && !listening) {
+      return "Speech model ready — press Start listening.";
+    }
+    return lastError ?? "";
+  })();
+  const isError =
+    modelStatus?.state === "error" ||
+    session.state === "error" ||
+    lastError === "consent_required" ||
+    (lastError !== null && !lastError.includes("model_downloading"));
 
   return (
     <header className="flex h-10 shrink-0 items-center gap-3 border-b border-border bg-panel px-4">
@@ -31,12 +57,12 @@ export function StatusBar({
       </span>
       <h1 className="text-sm font-semibold tracking-tight">convasist</h1>
 
-      <span className="ml-auto max-w-[40%] truncate text-xs text-rec">
-        {lastError === "consent_required"
-          ? "Acknowledge the consent notice first."
-          : session.state === "error"
-            ? session.message
-            : (lastError ?? "")}
+      <span
+        className={`ml-auto max-w-[50%] truncate text-xs ${isError ? "text-rec" : "text-fg-muted"}`}
+        role="status"
+        aria-live="polite"
+      >
+        {statusText}
       </span>
 
       {isTauri() && (

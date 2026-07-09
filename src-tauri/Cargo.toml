@@ -28,3 +28,9 @@ cpal = "0.16"
 # Lock-free SPSC ring between the device callback and the worker thread
 # (§2.4 rule 1: callbacks only copy into a ring buffer).
 rtrb = "0.3"
+# Local ASR: whisper.cpp bindings (design §2.3). CPU by default; GPU
+# features (cuda/vulkan/metal) are opt-in flags later.
+whisper-rs = "0.14"
+# First-run model downloader (T6). Small blocking HTTP client — runs on a
+# dedicated thread, never the UI or audio path.
+ureq = "2"

@@ -13,6 +13,7 @@ export const EVENTS = {
   audioLevel: "convasist://audio-level",
   sessionState: "convasist://session-state",
   assistChunk: "convasist://assist-chunk",
+  modelStatus: "convasist://model-status",
 } as const;
 
 export interface TranscriptSegment {
@@ -43,6 +44,11 @@ export interface AssistChunkEvent {
   token: string;
   done: boolean;
 }
+
+export type ModelStatusEvent =
+  | { state: "downloading"; model: string; percent: number }
+  | { state: "ready"; model: string }
+  | { state: "error"; model: string; message: string };
 
 /** Mirror of convasist-core llm::ProviderId (snake_case serde). */
 export type ProviderId =
