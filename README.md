@@ -32,6 +32,19 @@ Prereqs:
 
 WebView2 is preinstalled on Windows 11. Open a fresh terminal after installs so PATH changes apply. See also the [Tauri 2 Windows prerequisites](https://tauri.app/start/prerequisites/).
 
+### Build troubleshooting (whisper-rs bindgen), from real machine setups
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `Unable to find libclang … (invalid: [])` | LLVM missing, or `LIBCLANG_PATH` not set in the window running the build | Install LLVM 18.x (prereq 4); run `$env:LIBCLANG_PATH = "C:\Program Files\LLVM\bin"` in the build window |
+| `error[E0080] … Size of whisper_full_params` layout assert | LLVM 20+ generated broken bindings | Replace with LLVM 18.1.8; `cargo clean -p whisper-rs-sys`; rebuild |
+| `error[E0080] … Size of _IO_FILE / _G_fpos_t` | bindgen failed entirely, fell back to whisper-rs's **Linux-generated** bundled bindings (never valid on Windows) — see the `Unable to generate bindings` warning above it for the real error | Fix the underlying clang error below, then rebuild |
+| `fatal error: 'stdbool.h' file not found` | clang's builtin headers not resolving (e.g. a second LLVM was layered into `C:\Program Files\LLVM` — check `lib\clang` for multiple version folders) | `$env:BINDGEN_EXTRA_CLANG_ARGS = '-I"C:\Program Files\LLVM\lib\clang\18\include"'` (persist with `[Environment]::SetEnvironmentVariable(...)`) |
+| `fatal error: 'stdio.h' file not found` | clang can't locate the MSVC/Windows SDK includes from a plain shell (common with Build-Tools-only installs) | Build from **Developer PowerShell for VS 2022** (Start menu), or run `& "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64` first |
+| `is 'cmake' not installed?` | CMake not on PATH | Prereq 3, then a fresh terminal |
+
+The `output filename collision … convasist_app.pdb` warnings are harmless cargo noise (same-named bin and lib targets).
+
 ```powershell
 npm install
 npm run tauri dev
