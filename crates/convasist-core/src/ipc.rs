@@ -70,6 +70,8 @@ pub struct AssistChunkEvent {
     pub request_id: String,
     pub token: String,
     pub done: bool,
+    /// Set (with `done: true`) when the request failed mid-stream.
+    pub error: Option<String>,
 }
 
 #[cfg(test)]

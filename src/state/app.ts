@@ -2,7 +2,9 @@ import { create } from "zustand";
 
 import {
   getConfig,
+  getProviderRegistry,
   listAudioDevices,
+  providerKeyStatus,
   saveConfig,
   startSession,
   stopSession,
@@ -12,6 +14,8 @@ import {
   type AppConfig,
   type AudioDevice,
   type ModelStatusEvent,
+  type ProviderId,
+  type ProviderInfo,
 } from "@/lib/ipc";
 
 interface AppState {
@@ -21,6 +25,9 @@ interface AppState {
   lastError: string | null;
   modelStatus: ModelStatusEvent | null;
   setModelStatus: (status: ModelStatusEvent) => void;
+  registry: ProviderInfo[];
+  keyStatus: Partial<Record<ProviderId, boolean>>;
+  refreshKeyStatus: () => Promise<void>;
 
   init: () => Promise<void>;
   updateConfig: (patch: Partial<AppConfig>) => Promise<void>;
@@ -47,14 +54,30 @@ export const useAppStore = create<AppState>((set, get) => ({
     }));
   },
 
+  registry: [],
+  keyStatus: {},
+  refreshKeyStatus: async () => {
+    const statuses = await providerKeyStatus();
+    set({
+      keyStatus: Object.fromEntries(statuses.map((s) => [s.id, s.has_key])),
+    });
+  },
+
   init: async () => {
     if (!isTauri()) return;
     try {
-      const [config, devices] = await Promise.all([
+      const [config, devices, registry, keys] = await Promise.all([
         getConfig(),
         listAudioDevices(),
+        getProviderRegistry(),
+        providerKeyStatus(),
       ]);
-      set({ config, devices });
+      set({
+        config,
+        devices,
+        registry,
+        keyStatus: Object.fromEntries(keys.map((s) => [s.id, s.has_key])),
+      });
     } catch (e) {
       set({ lastError: String(e) });
     }

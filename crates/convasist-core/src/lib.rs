@@ -16,6 +16,7 @@ pub mod dsp;
 pub mod error;
 pub mod ipc;
 pub mod llm;
+pub mod prompt;
 pub mod rag;
 pub mod vad;
 

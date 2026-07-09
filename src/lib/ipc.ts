@@ -43,6 +43,20 @@ export interface AssistChunkEvent {
   request_id: string;
   token: string;
   done: boolean;
+  error: string | null;
+}
+
+/** Mirror of convasist-core prompt::AssistKind. */
+export type AssistKind = "suggest_reply" | "summarize" | "question";
+
+export interface ModelInfo {
+  id: string;
+  display_name: string;
+}
+
+export interface ProviderKeyStatus {
+  id: ProviderId;
+  has_key: boolean;
 }
 
 export type ModelStatusEvent =

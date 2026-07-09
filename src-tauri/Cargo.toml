@@ -31,6 +31,9 @@ rtrb = "0.3"
 # Local ASR: whisper.cpp bindings (design §2.3). CPU by default; GPU
 # features (cuda/vulkan/metal) are opt-in flags later.
 whisper-rs = "0.14"
-# First-run model downloader (T6). Small blocking HTTP client — runs on a
-# dedicated thread, never the UI or audio path.
-ureq = "2"
+# First-run model downloader (T6) + LLM SSE streaming. Small blocking HTTP
+# client — always driven from dedicated threads, never the UI or audio path.
+ureq = { version = "2", features = ["json"] }
+# API keys live in the OS credential vault (design §4.6) — Windows
+# Credential Manager on the Phase 1 target.
+keyring = { version = "3", features = ["windows-native", "linux-native"] }

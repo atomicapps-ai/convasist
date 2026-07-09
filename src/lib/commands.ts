@@ -5,7 +5,16 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
-import type { AppConfig, AudioDevice, ProviderInfo } from "@/lib/ipc";
+import type {
+  AppConfig,
+  AssistKind,
+  AudioDevice,
+  ModelInfo,
+  ProviderId,
+  ProviderInfo,
+  ProviderKeyStatus,
+  TranscriptSegment,
+} from "@/lib/ipc";
 
 export function getConfig(): Promise<AppConfig> {
   return invoke<AppConfig>("get_config");
@@ -29,4 +38,35 @@ export function startSession(): Promise<string> {
 
 export function stopSession(): Promise<void> {
   return invoke("stop_session");
+}
+
+export function setApiKey(provider: ProviderId, key: string): Promise<void> {
+  return invoke("set_api_key", { provider, key });
+}
+
+export function providerKeyStatus(): Promise<ProviderKeyStatus[]> {
+  return invoke<ProviderKeyStatus[]>("provider_key_status");
+}
+
+/** Returns measured first-token latency in ms. */
+export function testProvider(
+  provider: ProviderId,
+  model: string,
+): Promise<number> {
+  return invoke<number>("test_provider", { provider, model });
+}
+
+export function listProviderModels(
+  provider: ProviderId,
+): Promise<ModelInfo[]> {
+  return invoke<ModelInfo[]>("list_provider_models", { provider });
+}
+
+export function assist(
+  requestId: string,
+  kind: AssistKind,
+  question: string | null,
+  segments: TranscriptSegment[],
+): Promise<void> {
+  return invoke("assist", { requestId, kind, question, segments });
 }

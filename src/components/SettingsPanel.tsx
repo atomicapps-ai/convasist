@@ -1,3 +1,4 @@
+import { AiSettings } from "@/components/AiSettings";
 import type { StreamSide } from "@/lib/ipc";
 import { useAppStore } from "@/state/app";
 
@@ -67,6 +68,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         Device changes apply when the next session starts. Tip: use a headset —
         open speakers leak the other side into your microphone.
       </p>
+      <AiSettings />
     </div>
   );
 }
