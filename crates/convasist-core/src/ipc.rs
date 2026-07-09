@@ -22,6 +22,8 @@ pub mod events {
     pub const ASSIST_CHUNK: &str = "convasist://assist-chunk";
     /// Payload: [`super::ModelStatusEvent`]
     pub const MODEL_STATUS: &str = "convasist://model-status";
+    /// Payload: [`super::AssistSourcesEvent`]
+    pub const ASSIST_SOURCES: &str = "convasist://assist-sources";
 }
 
 /// Re-exported so the IPC module is a one-stop description of the wire.
@@ -52,6 +54,20 @@ pub enum SessionStateEvent {
     Error {
         message: String,
     },
+}
+
+/// Which reference chunks grounded an assist answer (R5 "peek" — emitted
+/// once per request, before the first token).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssistSourcesEvent {
+    pub request_id: String,
+    pub sources: Vec<AssistSource>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssistSource {
+    pub file_name: String,
+    pub location: String,
 }
 
 /// ASR model provisioning progress (T6 first-run downloader).

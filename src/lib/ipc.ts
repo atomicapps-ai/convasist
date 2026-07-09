@@ -14,6 +14,7 @@ export const EVENTS = {
   sessionState: "convasist://session-state",
   assistChunk: "convasist://assist-chunk",
   modelStatus: "convasist://model-status",
+  assistSources: "convasist://assist-sources",
 } as const;
 
 export interface TranscriptSegment {
@@ -57,6 +58,30 @@ export interface ModelInfo {
 export interface ProviderKeyStatus {
   id: ProviderId;
   has_key: boolean;
+}
+
+export interface AssistSource {
+  file_name: string;
+  location: string;
+}
+
+export interface AssistSourcesEvent {
+  request_id: string;
+  sources: AssistSource[];
+}
+
+/** Mirror of convasist-core rag::RagDocument. */
+export interface RagDocument {
+  id: string;
+  file_name: string;
+  enabled: boolean;
+  chunk_count: number;
+  ingested_at_unix_ms: number;
+}
+
+export interface IngestReport {
+  document: RagDocument;
+  warnings: string[];
 }
 
 export type ModelStatusEvent =

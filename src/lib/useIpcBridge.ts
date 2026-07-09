@@ -4,6 +4,7 @@ import {
   EVENTS,
   isTauri,
   type AssistChunkEvent,
+  type AssistSourcesEvent,
   type AudioLevelEvent,
   type ModelStatusEvent,
   type SessionStateEvent,
@@ -24,6 +25,7 @@ export function useIpcBridge(): void {
   const setLevel = useTranscriptStore((s) => s.setLevel);
   const setModelStatus = useAppStore((s) => s.setModelStatus);
   const applyAssistChunk = useAssistStore((s) => s.applyChunk);
+  const applyAssistSources = useAssistStore((s) => s.applySources);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -47,6 +49,9 @@ export function useIpcBridge(): void {
         listen<AssistChunkEvent>(EVENTS.assistChunk, (e) =>
           applyAssistChunk(e.payload),
         ),
+        listen<AssistSourcesEvent>(EVENTS.assistSources, (e) =>
+          applyAssistSources(e.payload),
+        ),
       ]);
       if (cancelled) {
         subs.forEach((un) => un());
@@ -59,5 +64,12 @@ export function useIpcBridge(): void {
       cancelled = true;
       unlisteners.forEach((un) => un());
     };
-  }, [applySegment, setSession, setLevel, setModelStatus, applyAssistChunk]);
+  }, [
+    applySegment,
+    setSession,
+    setLevel,
+    setModelStatus,
+    applyAssistChunk,
+    applyAssistSources,
+  ]);
 }

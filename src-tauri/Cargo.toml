@@ -37,3 +37,9 @@ ureq = { version = "2", features = ["json"] }
 # API keys live in the OS credential vault (design §4.6) — Windows
 # Credential Manager on the Phase 1 target.
 keyring = { version = "3", features = ["windows-native", "linux-native"] }
+# RAG ingestion (design §4.4 R1): PDF text extraction (pure Rust) and DOCX
+# (a zip of XML — we unzip and strip tags ourselves).
+pdf-extract = "0.7"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+# Native file-picker for the RAG library "Add documents" button.
+tauri-plugin-dialog = "2"

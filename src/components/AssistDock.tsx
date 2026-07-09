@@ -37,6 +37,18 @@ function Card({ card }: { card: AssistCard }) {
           {card.text || "…"}
         </p>
       )}
+      {card.sources.length > 0 && (
+        <p className="mt-1.5 text-[11px] text-fg-faint">
+          sources:{" "}
+          {[
+            ...new Set(
+              card.sources.map((s) => `${s.file_name} · ${s.location}`),
+            ),
+          ]
+            .slice(0, 4)
+            .join("  ·  ")}
+        </p>
+      )}
     </div>
   );
 }

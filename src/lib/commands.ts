@@ -9,10 +9,12 @@ import type {
   AppConfig,
   AssistKind,
   AudioDevice,
+  IngestReport,
   ModelInfo,
   ProviderId,
   ProviderInfo,
   ProviderKeyStatus,
+  RagDocument,
   TranscriptSegment,
 } from "@/lib/ipc";
 
@@ -69,4 +71,20 @@ export function assist(
   segments: TranscriptSegment[],
 ): Promise<void> {
   return invoke("assist", { requestId, kind, question, segments });
+}
+
+export function ragIngest(paths: string[]): Promise<IngestReport[]> {
+  return invoke<IngestReport[]>("rag_ingest", { paths });
+}
+
+export function ragList(): Promise<RagDocument[]> {
+  return invoke<RagDocument[]>("rag_list");
+}
+
+export function ragSetEnabled(id: string, enabled: boolean): Promise<void> {
+  return invoke("rag_set_enabled", { id, enabled });
+}
+
+export function ragDelete(id: string): Promise<void> {
+  return invoke("rag_delete", { id });
 }

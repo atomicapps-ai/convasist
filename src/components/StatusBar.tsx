@@ -4,8 +4,10 @@ import { useTranscriptStore } from "@/state/transcript";
 
 export function StatusBar({
   onToggleSettings,
+  onToggleLibrary,
 }: {
   onToggleSettings: () => void;
+  onToggleLibrary: () => void;
 }) {
   const session = useTranscriptStore((s) => s.session);
   const busy = useAppStore((s) => s.busy);
@@ -82,11 +84,19 @@ export function StatusBar({
           </button>
           <button
             type="button"
-            onClick={onToggleSettings}
-            aria-label="Audio device settings"
+            onClick={onToggleLibrary}
+            aria-label="Reference document library"
             className="rounded-md border border-border px-2 py-1 text-xs text-fg-muted hover:text-fg"
           >
-            Devices
+            Library
+          </button>
+          <button
+            type="button"
+            onClick={onToggleSettings}
+            aria-label="Devices and AI settings"
+            className="rounded-md border border-border px-2 py-1 text-xs text-fg-muted hover:text-fg"
+          >
+            Settings
           </button>
         </>
       )}

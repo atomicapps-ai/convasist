@@ -1,7 +1,12 @@
 import { create } from "zustand";
 
 import { assist as invokeAssist } from "@/lib/commands";
-import type { AssistChunkEvent, AssistKind } from "@/lib/ipc";
+import type {
+  AssistChunkEvent,
+  AssistKind,
+  AssistSource,
+  AssistSourcesEvent,
+} from "@/lib/ipc";
 import { useTranscriptStore } from "@/state/transcript";
 
 export interface AssistCard {
@@ -11,6 +16,7 @@ export interface AssistCard {
   text: string;
   done: boolean;
   error: string | null;
+  sources: AssistSource[];
   startedAtMs: number;
 }
 
@@ -20,6 +26,7 @@ interface AssistState {
 
   request: (kind: AssistKind, question?: string) => Promise<void>;
   applyChunk: (chunk: AssistChunkEvent) => void;
+  applySources: (event: AssistSourcesEvent) => void;
   clear: () => void;
 }
 
@@ -44,6 +51,7 @@ export const useAssistStore = create<AssistState>((set, get) => ({
           text: "",
           done: false,
           error: null,
+          sources: [],
           startedAtMs: Date.now(),
         },
         ...s.cards.slice(0, 4),
@@ -74,6 +82,13 @@ export const useAssistStore = create<AssistState>((set, get) => ({
               error: chunk.error,
             }
           : c,
+      ),
+    })),
+
+  applySources: (event) =>
+    set((s) => ({
+      cards: s.cards.map((c) =>
+        c.id === event.request_id ? { ...c, sources: event.sources } : c,
       ),
     })),
 

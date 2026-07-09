@@ -8,6 +8,7 @@ mod asr;
 mod audio;
 mod llm;
 mod models;
+mod rag;
 mod session;
 
 use std::fs;
@@ -16,19 +17,24 @@ use std::sync::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
+use std::sync::Arc;
+
 use convasist_core::asr::TranscriptSegment;
 use convasist_core::audio::AudioDevice;
 use convasist_core::config::AppConfig;
-use convasist_core::ipc::{events, AssistChunkEvent};
+use convasist_core::ipc::{events, AssistChunkEvent, AssistSource, AssistSourcesEvent};
 use convasist_core::llm::{provider_registry, ModelInfo, ProviderId, ProviderInfo};
 use convasist_core::prompt::{build_assist_request, AssistKind};
+use convasist_core::rag::{IngestReport, RagDocument};
 
+use rag::RagStore;
 use session::SessionManager;
 
 /// In-memory app state; the config mirrors the JSON file on disk.
 struct AppState {
     config: Mutex<AppConfig>,
     session: SessionManager,
+    rag: Arc<RagStore>,
 }
 
 fn config_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
@@ -155,8 +161,65 @@ async fn list_provider_models(provider: ProviderId) -> Result<Vec<ModelInfo>, St
     .map_err(|e| e.to_string())?
 }
 
-/// Manual assist (U4/O2): builds the context from the segments the UI sent,
-/// streams the answer back as ASSIST_CHUNK events. Returns immediately.
+// ------------------------------------------------------------ RAG library
+
+#[tauri::command]
+async fn rag_ingest(
+    state: State<'_, AppState>,
+    paths: Vec<String>,
+) -> Result<Vec<IngestReport>, String> {
+    let store = state.rag.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut reports = Vec::new();
+        for path in paths {
+            match store.ingest(&path) {
+                Ok(report) => reports.push(report),
+                Err(e) => return Err(e.to_string()),
+            }
+        }
+        Ok(reports)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn rag_list(state: State<AppState>) -> Vec<RagDocument> {
+    state.rag.list()
+}
+
+#[tauri::command]
+fn rag_set_enabled(state: State<AppState>, id: String, enabled: bool) -> Result<(), String> {
+    state
+        .rag
+        .set_enabled(&id, enabled)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn rag_delete(state: State<AppState>, id: String) -> Result<(), String> {
+    state.rag.delete(&id).map_err(|e| e.to_string())
+}
+
+/// Build the retrieval query for an assist: the explicit question, or the
+/// text of the last few finalized turns (what's being discussed right now).
+fn retrieval_query(question: Option<&str>, segments: &[TranscriptSegment]) -> String {
+    if let Some(q) = question {
+        return q.to_string();
+    }
+    segments
+        .iter()
+        .rev()
+        .filter(|s| s.is_final)
+        .take(4)
+        .map(|s| s.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Manual assist (U4/O2): retrieves grounding chunks (R4), builds the
+/// context, and streams the answer back as ASSIST_CHUNK events. Returns
+/// immediately.
 #[tauri::command]
 fn assist(
     app: AppHandle,
@@ -173,7 +236,29 @@ fn assist(
         .llm_quality
         .clone();
     let key = resolve_key(selection.provider)?;
-    let request = build_assist_request(kind, &segments, &[], question.as_deref(), 1024);
+
+    let query = retrieval_query(question.as_deref(), &segments);
+    let chunks = if query.trim().is_empty() {
+        Vec::new()
+    } else {
+        state.rag.retrieve(&query, 8)
+    };
+    // R5 "peek": tell the UI which sources ground this answer, up front.
+    let _ = app.emit(
+        events::ASSIST_SOURCES,
+        AssistSourcesEvent {
+            request_id: request_id.clone(),
+            sources: chunks
+                .iter()
+                .map(|c| AssistSource {
+                    file_name: c.file_name.clone(),
+                    location: c.location.clone(),
+                })
+                .collect(),
+        },
+    );
+
+    let request = build_assist_request(kind, &segments, &chunks, question.as_deref(), 1024);
 
     std::thread::Builder::new()
         .name("assist".into())
@@ -207,11 +292,18 @@ fn assist(
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let config = load_config(app.handle());
+            let data_dir = app
+                .path()
+                .app_data_dir()
+                .expect("app data dir must resolve");
+            let rag = Arc::new(RagStore::open(&data_dir).expect("open rag store"));
             app.manage(AppState {
                 config: Mutex::new(config),
                 session: SessionManager::new(),
+                rag,
             });
             Ok(())
         })
@@ -227,6 +319,10 @@ pub fn run() {
             test_provider,
             list_provider_models,
             assist,
+            rag_ingest,
+            rag_list,
+            rag_set_enabled,
+            rag_delete,
         ])
         .run(tauri::generate_context!())
         .expect("error while running convasist");

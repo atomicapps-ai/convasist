@@ -11,6 +11,8 @@
 
 pub mod asr;
 pub mod audio;
+pub mod bm25;
+pub mod chunk;
 pub mod config;
 pub mod dsp;
 pub mod error;
