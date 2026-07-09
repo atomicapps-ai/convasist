@@ -298,7 +298,7 @@ Accessibility floor: AA contrast for body text at both modes, `role="status"`/`a
 
 Four candidates, ranked. Each is a policy on top of the O-layer — none changes the architecture, which is exactly why they're worth deciding now (the trigger/debounce plumbing O5 is shared).
 
-### 6.1 Live Answer Copilot ⭐ recommended
+### 6.1 Live Answer Assist ⭐ recommended
 When the inbound stream finalizes an utterance that VAD marks as a *question or objection directed at you*, haiku drafts 1–2 bullet talking points — grounded in RAG — before you've finished inhaling. Debounced (≥4 s between suggestions), cooldown-aware, and silent unless confidence is high. This is the "wow" feature: the app answers the question you were *about to be asked to answer*.
 
 ### 6.2 Question Radar + instant RAG cards
