@@ -280,7 +280,7 @@ pub fn list_sessions(app: &AppHandle) -> Result<Vec<SessionSummary>, CoreError> 
             preview,
         });
     }
-    sessions.sort_by(|a, b| b.started_at_unix_ms.cmp(&a.started_at_unix_ms));
+    sessions.sort_by_key(|s| std::cmp::Reverse(s.started_at_unix_ms));
     Ok(sessions)
 }
 
