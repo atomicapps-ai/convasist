@@ -370,16 +370,16 @@ Each milestone is independently demoable; M1 is deliberately the riskiest slice 
 
 ---
 
-## 9. Decisions requested from the owner
+## 9. Decisions — RESOLVED 2026-07-09 (owner approved; build began)
 
-| # | Decision | Options | Recommendation |
-|---|---|---|---|
-| 1 | Approve shell/stack | Tauri 2 / Electron+Rust / other | **Tauri 2** (§2.2) |
-| 2 | Default ASR posture | Local whisper / cloud Deepgram / trait+both | **Trait + local default, cloud opt-in** (§2.3) |
-| 3 | LLM provider | ~~Claude only / multi-provider~~ | ✅ **DECIDED 2026-07-09: provider-agnostic, Claude default, top-5 registry + provider/model dropdowns (§4.6)** |
-| 4 | Phase 1 OS scope | Windows-only / Win+macOS | **Windows-only**, macOS 1.5 (§7.7) |
-| 5 | Visual direction | a Operator / b Paper / c Radar (§5.3) | **a — Operator** |
-| 6 | Enhancement picks | §6.1–6.4 | **6.2 + 6.3 core, 6.1 stretch, 6.4 next** |
-| 7 | Consent posture (§7.1) | acknowledge-on-first-run + REC indicator | Required before any external user |
+| # | Decision | Resolution |
+|---|---|---|
+| 1 | Shell/stack | ✅ **Tauri 2 + Rust core + React/TS** (§2.2, as recommended) |
+| 2 | Default ASR posture | ✅ **Engine trait; local whisper default, cloud opt-in** (§2.3, as recommended) |
+| 3 | LLM provider | ✅ **Provider-agnostic, Claude default, top-5 registry + provider/model dropdowns** (§4.6, owner-directed) |
+| 4 | Phase 1 OS scope | ✅ **Windows-only** (owner: "Yes windows only"); macOS in Phase 1.5 behind the `AudioSource` trait |
+| 5 | Visual direction | ✅ **a — Operator** (§5.3, as recommended) |
+| 6 | Enhancement picks | ✅ **6.2 + 6.3 core, 6.1 stretch, 6.4 Phase 1.5** (as recommended) |
+| 7 | Consent posture | ✅ **First-run acknowledgment + visible REC indicator** required before any external user (§7.1) |
 
-Reply with row numbers (e.g., "1–6 approved as recommended, 7 discuss") — coding starts only after explicit approval per the behavioral rules.
+Approved by the owner on 2026-07-09 ("Yes windows only lets begin"); rows without an explicit owner call follow the documented recommendations. Build proceeds per the §8 milestone plan, starting at M0.
