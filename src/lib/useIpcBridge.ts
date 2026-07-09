@@ -7,6 +7,7 @@ import {
   type AssistSourcesEvent,
   type AudioLevelEvent,
   type ModelStatusEvent,
+  type RadarEvent,
   type SessionStateEvent,
   type TranscriptSegment,
 } from "@/lib/ipc";
@@ -26,6 +27,7 @@ export function useIpcBridge(): void {
   const setModelStatus = useAppStore((s) => s.setModelStatus);
   const applyAssistChunk = useAssistStore((s) => s.applyChunk);
   const applyAssistSources = useAssistStore((s) => s.applySources);
+  const applyRadar = useAssistStore((s) => s.applyRadar);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -52,6 +54,7 @@ export function useIpcBridge(): void {
         listen<AssistSourcesEvent>(EVENTS.assistSources, (e) =>
           applyAssistSources(e.payload),
         ),
+        listen<RadarEvent>(EVENTS.radar, (e) => applyRadar(e.payload)),
       ]);
       if (cancelled) {
         subs.forEach((un) => un());
@@ -71,5 +74,6 @@ export function useIpcBridge(): void {
     setModelStatus,
     applyAssistChunk,
     applyAssistSources,
+    applyRadar,
   ]);
 }

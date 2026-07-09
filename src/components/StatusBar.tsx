@@ -5,9 +5,11 @@ import { useTranscriptStore } from "@/state/transcript";
 export function StatusBar({
   onToggleSettings,
   onToggleLibrary,
+  onToggleSessions,
 }: {
   onToggleSettings: () => void;
   onToggleLibrary: () => void;
+  onToggleSessions: () => void;
 }) {
   const session = useTranscriptStore((s) => s.session);
   const busy = useAppStore((s) => s.busy);
@@ -81,6 +83,14 @@ export function StatusBar({
             ].join(" ")}
           >
             {listening ? "Stop" : "Start listening"}
+          </button>
+          <button
+            type="button"
+            onClick={onToggleSessions}
+            aria-label="Past sessions and export"
+            className="rounded-md border border-border px-2 py-1 text-xs text-fg-muted hover:text-fg"
+          >
+            Sessions
           </button>
           <button
             type="button"

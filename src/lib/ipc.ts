@@ -15,6 +15,7 @@ export const EVENTS = {
   assistChunk: "convasist://assist-chunk",
   modelStatus: "convasist://model-status",
   assistSources: "convasist://assist-sources",
+  radar: "convasist://radar",
 } as const;
 
 export interface TranscriptSegment {
@@ -82,6 +83,26 @@ export interface RagDocument {
 export interface IngestReport {
   document: RagDocument;
   warnings: string[];
+}
+
+export interface ScoredChunk {
+  document_id: string;
+  file_name: string;
+  location: string;
+  text: string;
+  score: number;
+}
+
+export interface RadarEvent {
+  question: string;
+  sources: ScoredChunk[];
+}
+
+export interface SessionSummary {
+  id: string;
+  started_at_unix_ms: number;
+  segment_count: number;
+  preview: string;
 }
 
 export type ModelStatusEvent =

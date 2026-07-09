@@ -57,6 +57,52 @@ function Card({ card }: { card: AssistCard }) {
  * AI assist dock (design §5.2, U4/O2): action buttons + streaming answer
  * cards. `Ctrl+Space` fires "suggest reply" from anywhere in the app.
  */
+/** Instant reference hit for an inbound question (§6.2) — zero LLM cost. */
+function RadarCard() {
+  const radar = useAssistStore((s) => s.radar);
+  const dismiss = useAssistStore((s) => s.dismissRadar);
+  const request = useAssistStore((s) => s.request);
+  if (!radar) return null;
+
+  return (
+    <div className="mt-2 rounded-md border border-inbound/30 bg-inbound/5 px-3 py-2">
+      <div className="flex items-center gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-inbound">
+          They asked
+        </span>
+        <span className="truncate text-xs text-fg-muted">
+          “{radar.question}”
+        </span>
+        <button
+          type="button"
+          onClick={() => void request("question", radar.question)}
+          className="ml-auto rounded-md border border-ai/40 px-2 py-0.5 text-[11px] text-ai hover:bg-ai/10"
+        >
+          ✦ Elaborate
+        </button>
+        <button
+          type="button"
+          onClick={dismiss}
+          aria-label="Dismiss"
+          className="text-[11px] text-fg-faint hover:text-fg"
+        >
+          ✕
+        </button>
+      </div>
+      <div className="mt-1.5 flex flex-col gap-1">
+        {radar.sources.slice(0, 2).map((s, i) => (
+          <p key={i} className="text-xs leading-relaxed text-fg">
+            <span className="font-mono text-[10px] text-fg-faint">
+              {s.file_name} · {s.location} —{" "}
+            </span>
+            {s.text.length > 280 ? `${s.text.slice(0, 280)}…` : s.text}
+          </p>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function AssistDock() {
   const cards = useAssistStore((s) => s.cards);
   const busy = useAssistStore((s) => s.busy);
@@ -138,6 +184,7 @@ export function AssistDock() {
           </button>
         )}
       </div>
+      <RadarCard />
       {!collapsed && cards.length > 0 && (
         <div className="mt-2 flex flex-col gap-2">
           {cards.map((card) => (

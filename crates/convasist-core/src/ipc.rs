@@ -24,6 +24,8 @@ pub mod events {
     pub const MODEL_STATUS: &str = "convasist://model-status";
     /// Payload: [`super::AssistSourcesEvent`]
     pub const ASSIST_SOURCES: &str = "convasist://assist-sources";
+    /// Payload: [`super::RadarEvent`]
+    pub const RADAR: &str = "convasist://radar";
 }
 
 /// Re-exported so the IPC module is a one-stop description of the wire.
@@ -68,6 +70,15 @@ pub struct AssistSourcesEvent {
 pub struct AssistSource {
     pub file_name: String,
     pub location: String,
+}
+
+/// Question Radar hit (§6.2): the other party asked something the reference
+/// library can answer — chunks shown verbatim, zero cost, instantly.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RadarEvent {
+    /// The inbound utterance that triggered the radar.
+    pub question: String,
+    pub sources: Vec<crate::rag::ScoredChunk>,
 }
 
 /// ASR model provisioning progress (T6 first-run downloader).

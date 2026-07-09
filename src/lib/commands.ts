@@ -15,6 +15,7 @@ import type {
   ProviderInfo,
   ProviderKeyStatus,
   RagDocument,
+  SessionSummary,
   TranscriptSegment,
 } from "@/lib/ipc";
 
@@ -87,4 +88,19 @@ export function ragSetEnabled(id: string, enabled: boolean): Promise<void> {
 
 export function ragDelete(id: string): Promise<void> {
   return invoke("rag_delete", { id });
+}
+
+export function sessionList(): Promise<SessionSummary[]> {
+  return invoke<SessionSummary[]>("session_list");
+}
+
+export function sessionLoad(id: string): Promise<TranscriptSegment[]> {
+  return invoke<TranscriptSegment[]>("session_load", { id });
+}
+
+export function exportTranscript(
+  path: string,
+  segments: TranscriptSegment[],
+): Promise<void> {
+  return invoke("export_transcript", { path, segments });
 }

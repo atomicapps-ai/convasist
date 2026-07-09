@@ -1,23 +1,29 @@
 //! Session lifecycle (U3): owns capture sources + per-side ASR engines,
-//! meters the streams, and broadcasts typed IPC events.
+//! meters the streams, persists finalized segments to a per-session JSONL
+//! file, fires the Question Radar (§6.2), and broadcasts typed IPC events.
 
+use std::fs;
+use std::io::Write;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
-use convasist_core::asr::TranscriptionEngine;
+use convasist_core::asr::{TranscriptSegment, TranscriptionEngine};
 use convasist_core::audio::{AudioFrame, AudioSource, StreamSide};
 use convasist_core::config::AppConfig;
 use convasist_core::dsp::rms_dbfs;
-use convasist_core::ipc::{events, AudioLevelEvent, SessionStateEvent};
+use convasist_core::ipc::{events, AudioLevelEvent, RadarEvent, SessionStateEvent};
+use convasist_core::radar::looks_like_question;
 use convasist_core::CoreError;
 
 use crate::asr::{SharedWhisper, WhisperEngine};
 use crate::audio::CpalSource;
 use crate::models;
+use crate::rag::RagStore;
 
 /// A stream is unhealthy when no frames arrived for this long (A4 watchdog).
 const STALL_AFTER: Duration = Duration::from_millis(1500);
@@ -57,7 +63,12 @@ impl SessionManager {
         Ok(shared)
     }
 
-    pub fn start(&self, app: &AppHandle, config: &AppConfig) -> Result<String, CoreError> {
+    pub fn start(
+        &self,
+        app: &AppHandle,
+        config: &AppConfig,
+        rag: Arc<RagStore>,
+    ) -> Result<String, CoreError> {
         {
             let active = self.active.lock().expect("session lock");
             if let Some(existing) = active.as_ref() {
@@ -75,6 +86,10 @@ impl SessionManager {
         // last-frame clocks (ms since epoch) per side, shared with watchdog.
         let last_frame = Arc::new([AtomicU64::new(0), AtomicU64::new(0)]);
 
+        // Per-session transcript file (U3): meta line, then one JSON
+        // segment per line. Shared by both sides' sinks.
+        let session_file = Arc::new(Mutex::new(open_session_file(app, &session_id)?));
+
         let mut engines = Vec::new();
         let mut sources = Vec::new();
         for (side, device) in [
@@ -82,7 +97,11 @@ impl SessionManager {
             (StreamSide::Inbound, config.loopback_device.clone()),
         ] {
             let mut engine = WhisperEngine::new(shared.clone(), side);
-            engine.set_sink(make_transcript_sink(app.clone()));
+            engine.set_sink(make_transcript_sink(
+                app.clone(),
+                rag.clone(),
+                session_file.clone(),
+            ));
             let frames_tx = engine.frame_sender()?;
 
             let mut source = CpalSource::new(side, device);
@@ -164,14 +183,119 @@ fn make_frame_sink(
     })
 }
 
-/// Transcript sink: broadcast segments to the UI. Session persistence (U3
-/// reopen) attaches here in M2b.
+/// Transcript sink: broadcast segments to the UI, persist finals to the
+/// session file (U3), and fire the Question Radar on inbound questions
+/// (§6.2 — verbatim reference chunks, zero LLM cost).
 fn make_transcript_sink(
     app: AppHandle,
-) -> Box<dyn FnMut(convasist_core::asr::TranscriptSegment) + Send> {
+    rag: Arc<RagStore>,
+    session_file: Arc<Mutex<fs::File>>,
+) -> Box<dyn FnMut(TranscriptSegment) + Send> {
     Box::new(move |segment| {
+        if segment.is_final {
+            if let Ok(json) = serde_json::to_string(&segment) {
+                if let Ok(mut file) = session_file.lock() {
+                    let _ = writeln!(file, "{json}");
+                }
+            }
+            if segment.side == StreamSide::Inbound && looks_like_question(&segment.text) {
+                let sources = rag.retrieve(&segment.text, 3);
+                if !sources.is_empty() {
+                    let _ = app.emit(
+                        events::RADAR,
+                        RadarEvent {
+                            question: segment.text.clone(),
+                            sources,
+                        },
+                    );
+                }
+            }
+        }
         let _ = app.emit(events::TRANSCRIPT_SEGMENT, segment);
     })
+}
+
+fn sessions_dir(app: &AppHandle) -> Result<PathBuf, CoreError> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| CoreError::Audio(format!("no app data dir: {e}")))?
+        .join("sessions");
+    fs::create_dir_all(&dir).map_err(|e| CoreError::Audio(e.to_string()))?;
+    Ok(dir)
+}
+
+fn open_session_file(app: &AppHandle, session_id: &str) -> Result<fs::File, CoreError> {
+    let path = sessions_dir(app)?.join(format!("{session_id}.jsonl"));
+    let mut file = fs::File::create(path).map_err(|e| CoreError::Audio(e.to_string()))?;
+    let meta = serde_json::json!({
+        "id": session_id,
+        "started_at_unix_ms": now_unix_ms(),
+    });
+    writeln!(file, "{meta}").map_err(|e| CoreError::Audio(e.to_string()))?;
+    Ok(file)
+}
+
+/// Past-session catalog entry (U3 sessions list).
+#[derive(serde::Serialize)]
+pub struct SessionSummary {
+    pub id: String,
+    pub started_at_unix_ms: u64,
+    pub segment_count: u32,
+    /// First few words of the conversation, for the list.
+    pub preview: String,
+}
+
+pub fn list_sessions(app: &AppHandle) -> Result<Vec<SessionSummary>, CoreError> {
+    let dir = sessions_dir(app)?;
+    let mut sessions = Vec::new();
+    for entry in fs::read_dir(&dir)
+        .map_err(|e| CoreError::Audio(e.to_string()))?
+        .flatten()
+    {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+            continue;
+        }
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let mut lines = content.lines();
+        let Some(meta) = lines
+            .next()
+            .and_then(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        else {
+            continue;
+        };
+        let segments: Vec<TranscriptSegment> =
+            lines.filter_map(|l| serde_json::from_str(l).ok()).collect();
+        let preview: String = segments
+            .first()
+            .map(|s| s.text.chars().take(60).collect())
+            .unwrap_or_default();
+        sessions.push(SessionSummary {
+            id: meta["id"].as_str().unwrap_or_default().to_string(),
+            started_at_unix_ms: meta["started_at_unix_ms"].as_u64().unwrap_or(0),
+            segment_count: segments.len() as u32,
+            preview,
+        });
+    }
+    sessions.sort_by(|a, b| b.started_at_unix_ms.cmp(&a.started_at_unix_ms));
+    Ok(sessions)
+}
+
+pub fn load_session(app: &AppHandle, id: &str) -> Result<Vec<TranscriptSegment>, CoreError> {
+    // ids are generated by us, but never trust them as path components.
+    if id.contains(['/', '\\', '.']) {
+        return Err(CoreError::Audio("invalid session id".into()));
+    }
+    let path = sessions_dir(app)?.join(format!("{id}.jsonl"));
+    let content = fs::read_to_string(path).map_err(|e| CoreError::Audio(e.to_string()))?;
+    Ok(content
+        .lines()
+        .skip(1) // meta line
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect())
 }
 
 /// Emits `healthy: false` meter events for any side whose frames stall

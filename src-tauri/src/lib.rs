@@ -92,10 +92,44 @@ async fn start_session(app: AppHandle, state: State<'_, AppState>) -> Result<Str
     if !config.consent_acknowledged {
         return Err("consent_required".into());
     }
+    let rag = state.rag.clone();
     state
         .session
-        .start(&app, &config)
+        .start(&app, &config, rag)
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn session_list(app: AppHandle) -> Result<Vec<session::SessionSummary>, String> {
+    session::list_sessions(&app).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn session_load(app: AppHandle, id: String) -> Result<Vec<TranscriptSegment>, String> {
+    session::load_session(&app, &id).map_err(|e| e.to_string())
+}
+
+/// Export a transcript as Markdown to a caller-chosen path (U8). The UI
+/// obtains `path` from the native save dialog.
+#[tauri::command]
+fn export_transcript(path: String, segments: Vec<TranscriptSegment>) -> Result<(), String> {
+    use convasist_core::audio::StreamSide;
+    let mut out = String::from("# convasist transcript\n\n");
+    for s in segments.iter().filter(|s| s.is_final) {
+        let speaker = match s.side {
+            StreamSide::Inbound => "Them",
+            StreamSide::Outbound => "You",
+        };
+        let total_seconds = s.start_ms / 1000;
+        out.push_str(&format!(
+            "**{speaker}** ({:02}:{:02}:{:02}): {}\n\n",
+            total_seconds / 3600,
+            (total_seconds % 3600) / 60,
+            total_seconds % 60,
+            s.text.trim()
+        ));
+    }
+    fs::write(&path, out).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -323,6 +357,9 @@ pub fn run() {
             rag_list,
             rag_set_enabled,
             rag_delete,
+            session_list,
+            session_load,
+            export_transcript,
         ])
         .run(tauri::generate_context!())
         .expect("error while running convasist");

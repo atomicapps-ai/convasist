@@ -6,6 +6,7 @@ import type {
   AssistKind,
   AssistSource,
   AssistSourcesEvent,
+  RadarEvent,
 } from "@/lib/ipc";
 import { useTranscriptStore } from "@/state/transcript";
 
@@ -23,10 +24,14 @@ export interface AssistCard {
 interface AssistState {
   cards: AssistCard[];
   busy: boolean;
+  /** Latest Question Radar hit (§6.2); replaced by each new question. */
+  radar: RadarEvent | null;
 
   request: (kind: AssistKind, question?: string) => Promise<void>;
   applyChunk: (chunk: AssistChunkEvent) => void;
   applySources: (event: AssistSourcesEvent) => void;
+  applyRadar: (event: RadarEvent) => void;
+  dismissRadar: () => void;
   clear: () => void;
 }
 
@@ -35,6 +40,7 @@ let counter = 0;
 export const useAssistStore = create<AssistState>((set, get) => ({
   cards: [],
   busy: false,
+  radar: null,
 
   request: async (kind, question) => {
     if (get().busy) return;
@@ -92,5 +98,9 @@ export const useAssistStore = create<AssistState>((set, get) => ({
       ),
     })),
 
-  clear: () => set({ cards: [] }),
+  applyRadar: (event) => set({ radar: event }),
+
+  dismissRadar: () => set({ radar: null }),
+
+  clear: () => set({ cards: [], radar: null }),
 }));
