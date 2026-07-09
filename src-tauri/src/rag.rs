@@ -5,8 +5,11 @@
 //! documents after every mutation — at reference-library scale that is
 //! milliseconds, and it keeps a single source of truth on disk.
 //!
-//! The vector/embedding half of hybrid retrieval (fastembed + ANN + RRF)
-//! joins behind this same interface in a later milestone.
+//! Retrieval is hybrid (R3): BM25 + cosine-over-embeddings fused with RRF,
+//! degrading to BM25-only whenever the embedder isn't ready. Embeddings
+//! are stored inline per chunk; brute-force cosine is microseconds at
+//! library scale (a dedicated ANN store earns its place only at orders of
+//! magnitude more chunks).
 
 use std::fs;
 use std::io::Read;
@@ -30,6 +33,10 @@ struct StoredDocument {
 struct StoredChunk {
     location: String,
     text: String,
+    /// BGE-small 384-dim embedding; empty when not (yet) embedded — such
+    /// chunks participate in BM25 only until the backfill reaches them.
+    #[serde(default)]
+    embedding: Vec<f32>,
 }
 
 /// One searchable chunk reference into the loaded corpus.
@@ -130,6 +137,16 @@ impl RagStore {
             warnings.push("very little text extracted — check the file".into());
         }
 
+        // Vector half of hybrid retrieval (R2) — best-effort: without the
+        // embedder the chunks still serve BM25, and the startup backfill
+        // embeds them later.
+        let embeddings = crate::embed::embed(chunks.iter().map(|c| c.text.clone()).collect());
+        if embeddings.is_none() {
+            warnings
+                .push("embeddings pending (model not ready) — keyword search only for now".into());
+        }
+        let mut embeddings = embeddings.unwrap_or_default().into_iter();
+
         let id = format!("doc-{}", crate::session::now_unix_ms());
         let stored = StoredDocument {
             document: RagDocument {
@@ -144,6 +161,7 @@ impl RagStore {
                 .map(|c| StoredChunk {
                     location: c.location,
                     text: c.text,
+                    embedding: embeddings.next().unwrap_or_default(),
                 })
                 .collect(),
         };
@@ -188,15 +206,46 @@ impl RagStore {
         self.reload()
     }
 
-    /// BM25 top-k over enabled documents' chunks (§2.5: <15 ms budget —
-    /// this is in-memory and microseconds at library scale).
+    /// Hybrid top-k over enabled documents' chunks (§4.4 R3): BM25 and
+    /// cosine-over-embeddings rankings fused with RRF. Falls back to pure
+    /// BM25 when the embedder (or a chunk's vector) is unavailable. All
+    /// in-memory — microseconds at library scale (§2.5 <15 ms budget).
     pub fn retrieve(&self, query: &str, k: usize) -> Vec<ScoredChunk> {
         let inner = self.inner.read().expect("rag lock");
         let Some(index) = &inner.index else {
             return Vec::new();
         };
-        index
-            .search(query, k)
+
+        let pool = k * 3;
+        let lexical: Vec<usize> = index
+            .search(query, pool)
+            .into_iter()
+            .map(|(entry, _)| entry)
+            .collect();
+
+        let semantic: Option<Vec<usize>> = crate::embed::embed_query(query).map(|qvec| {
+            convasist_core::fuse::top_k_cosine(
+                &qvec,
+                inner.entries.iter().enumerate().filter_map(|(i, entry)| {
+                    let doc = inner.documents.get(entry.document_index)?;
+                    let chunk = doc.chunks.get(entry.chunk_index)?;
+                    Some((i, chunk.embedding.as_slice()))
+                }),
+                pool,
+            )
+            .into_iter()
+            .map(|(entry, _)| entry)
+            .collect()
+        });
+
+        let fused: Vec<(usize, f32)> = match semantic {
+            Some(semantic) if !semantic.is_empty() => {
+                convasist_core::fuse::rrf_fuse(&[lexical, semantic], k)
+            }
+            _ => convasist_core::fuse::rrf_fuse(&[lexical], k),
+        };
+
+        fused
             .into_iter()
             .filter_map(|(entry_index, score)| {
                 let entry = inner.entries.get(entry_index)?;
@@ -211,6 +260,48 @@ impl RagStore {
                 })
             })
             .collect()
+    }
+
+    /// Embed chunks that were ingested before the model was ready (runs on
+    /// the startup warm thread). Rewrites affected documents and reloads.
+    pub fn backfill_embeddings(&self) {
+        let pending: Vec<String> = {
+            let inner = self.inner.read().expect("rag lock");
+            inner
+                .documents
+                .iter()
+                .filter(|d| d.chunks.iter().any(|c| c.embedding.is_empty()))
+                .map(|d| d.document.id.clone())
+                .collect()
+        };
+        for id in pending {
+            let path = self.doc_path(&id);
+            let Some(mut stored) = fs::read_to_string(&path)
+                .ok()
+                .and_then(|s| serde_json::from_str::<StoredDocument>(&s).ok())
+            else {
+                continue;
+            };
+            let texts: Vec<String> = stored
+                .chunks
+                .iter()
+                .filter(|c| c.embedding.is_empty())
+                .map(|c| c.text.clone())
+                .collect();
+            let Some(embeddings) = crate::embed::embed(texts) else {
+                return; // embedder unavailable — try again next startup
+            };
+            let mut embeddings = embeddings.into_iter();
+            for chunk in stored.chunks.iter_mut().filter(|c| c.embedding.is_empty()) {
+                if let Some(embedding) = embeddings.next() {
+                    chunk.embedding = embedding;
+                }
+            }
+            if let Ok(json) = serde_json::to_string(&stored) {
+                let _ = fs::write(&path, json);
+            }
+        }
+        let _ = self.reload();
     }
 }
 

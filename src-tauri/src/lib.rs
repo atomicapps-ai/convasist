@@ -6,6 +6,7 @@
 
 mod asr;
 mod audio;
+mod embed;
 mod llm;
 mod models;
 mod rag;
@@ -328,6 +329,21 @@ pub fn run() {
                 .app_data_dir()
                 .expect("app data dir must resolve");
             let rag = Arc::new(RagStore::open(&data_dir).expect("open rag store"));
+
+            // Warm the embedding model off the critical path (first run
+            // downloads ~130 MB), then embed any chunks ingested before it
+            // was ready. Retrieval degrades to BM25-only until this lands.
+            {
+                let rag = rag.clone();
+                let cache_dir = data_dir.join("models");
+                let _ = std::thread::Builder::new()
+                    .name("embed-warm".into())
+                    .spawn(move || {
+                        embed::warm(cache_dir);
+                        rag.backfill_embeddings();
+                    });
+            }
+
             app.manage(AppState {
                 config: Mutex::new(config),
                 session: SessionManager::new(),

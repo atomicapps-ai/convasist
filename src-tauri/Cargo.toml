@@ -43,3 +43,4 @@ pdf-extract = "0.7"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 # Native file-picker for the RAG library "Add documents" button.
 tauri-plugin-dialog = "2"
+fastembed = "4"
