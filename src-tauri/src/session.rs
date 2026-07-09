@@ -41,6 +41,9 @@ struct ActiveSession {
     sources: Vec<CpalSource>,
     engines: Vec<WhisperEngine>,
     stop_flag: Arc<AtomicBool>,
+    /// Held so the tracker worker lives with the session; dropping it (on
+    /// stop) triggers the tracker's final pass and shutdown.
+    _tracker_tx: Option<Sender<TranscriptSegment>>,
 }
 
 impl SessionManager {
@@ -90,6 +93,17 @@ impl SessionManager {
         // segment per line. Shared by both sides' sinks.
         let session_file = Arc::new(Mutex::new(open_session_file(app, &session_id)?));
 
+        // Commitment & entity tracker (§6.3): best-effort — only when
+        // enabled and the fast-slot provider has a usable key.
+        let tracker_tx = if config.tracker_enabled {
+            let selection = config.fast_selection().clone();
+            crate::llm::resolve_key(selection.provider)
+                .ok()
+                .map(|key| crate::tracker::spawn_tracker(app.clone(), selection, key))
+        } else {
+            None
+        };
+
         let mut engines = Vec::new();
         let mut sources = Vec::new();
         for (side, device) in [
@@ -101,6 +115,7 @@ impl SessionManager {
                 app.clone(),
                 rag.clone(),
                 session_file.clone(),
+                tracker_tx.clone(),
             ));
             let frames_tx = engine.frame_sender()?;
 
@@ -128,6 +143,7 @@ impl SessionManager {
             sources,
             engines,
             stop_flag,
+            _tracker_tx: tracker_tx,
         });
         Ok(session_id)
     }
@@ -190,6 +206,7 @@ fn make_transcript_sink(
     app: AppHandle,
     rag: Arc<RagStore>,
     session_file: Arc<Mutex<fs::File>>,
+    tracker_tx: Option<Sender<TranscriptSegment>>,
 ) -> Box<dyn FnMut(TranscriptSegment) + Send> {
     Box::new(move |segment| {
         if segment.is_final {
@@ -197,6 +214,9 @@ fn make_transcript_sink(
                 if let Ok(mut file) = session_file.lock() {
                     let _ = writeln!(file, "{json}");
                 }
+            }
+            if let Some(tracker) = &tracker_tx {
+                let _ = tracker.send(segment.clone());
             }
             if segment.side == StreamSide::Inbound && looks_like_question(&segment.text) {
                 let sources = rag.retrieve(&segment.text, 3);

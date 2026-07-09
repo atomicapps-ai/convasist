@@ -10,6 +10,7 @@ mod llm;
 mod models;
 mod rag;
 mod session;
+mod tracker;
 
 use std::fs;
 use std::sync::Mutex;
@@ -160,17 +161,10 @@ fn provider_key_status() -> Vec<ProviderKeyStatus> {
 }
 
 fn resolve_key(provider: ProviderId) -> Result<String, String> {
-    let requires_key = provider_registry()
-        .into_iter()
-        .find(|p| p.id == provider)
-        .map(|p| p.requires_api_key)
-        .unwrap_or(true);
-    match llm::load_api_key(provider) {
-        Ok(Some(key)) => Ok(key),
-        Ok(None) if !requires_key => Ok(String::new()),
-        Ok(None) => Err("api_key_missing".into()),
-        Err(e) => Err(e.to_string()),
-    }
+    llm::resolve_key(provider).map_err(|e| match e {
+        convasist_core::CoreError::Llm(msg) if msg == "api_key_missing" => msg,
+        other => other.to_string(),
+    })
 }
 
 /// Settings "Test" button: validates the stored key, returns first-token

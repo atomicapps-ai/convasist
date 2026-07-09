@@ -21,6 +21,7 @@ pub mod llm;
 pub mod prompt;
 pub mod radar;
 pub mod rag;
+pub mod tracker;
 pub mod vad;
 
 pub use error::CoreError;

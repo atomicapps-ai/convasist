@@ -7,6 +7,7 @@ import type {
   AssistSource,
   AssistSourcesEvent,
   RadarEvent,
+  TrackerEvent,
 } from "@/lib/ipc";
 import { useTranscriptStore } from "@/state/transcript";
 
@@ -26,11 +27,14 @@ interface AssistState {
   busy: boolean;
   /** Latest Question Radar hit (§6.2); replaced by each new question. */
   radar: RadarEvent | null;
+  /** Cumulative session tracker state (§6.3). */
+  tracker: TrackerEvent | null;
 
   request: (kind: AssistKind, question?: string) => Promise<void>;
   applyChunk: (chunk: AssistChunkEvent) => void;
   applySources: (event: AssistSourcesEvent) => void;
   applyRadar: (event: RadarEvent) => void;
+  applyTracker: (event: TrackerEvent) => void;
   dismissRadar: () => void;
   clear: () => void;
 }
@@ -41,6 +45,7 @@ export const useAssistStore = create<AssistState>((set, get) => ({
   cards: [],
   busy: false,
   radar: null,
+  tracker: null,
 
   request: async (kind, question) => {
     if (get().busy) return;
@@ -100,7 +105,9 @@ export const useAssistStore = create<AssistState>((set, get) => ({
 
   applyRadar: (event) => set({ radar: event }),
 
+  applyTracker: (event) => set({ tracker: event }),
+
   dismissRadar: () => set({ radar: null }),
 
-  clear: () => set({ cards: [], radar: null }),
+  clear: () => set({ cards: [], radar: null, tracker: null }),
 }));

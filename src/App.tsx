@@ -7,6 +7,7 @@ import { RagPanel } from "@/components/RagPanel";
 import { SessionsPanel } from "@/components/SessionsPanel";
 import { SettingsPanel } from "@/components/SettingsPanel";
 import { StatusBar } from "@/components/StatusBar";
+import { TrackerRail } from "@/components/TrackerRail";
 import { TranscriptView } from "@/components/transcript/TranscriptView";
 import { useIpcBridge } from "@/lib/useIpcBridge";
 import { useAppStore } from "@/state/app";
@@ -38,7 +39,10 @@ export default function App() {
       {panel === "sessions" && (
         <SessionsPanel onClose={() => setPanel("none")} />
       )}
-      <TranscriptView />
+      <div className="flex min-h-0 flex-1">
+        <TranscriptView />
+        <TrackerRail />
+      </div>
       <AssistDock />
       <HealthStrip />
       <ConsentGate />

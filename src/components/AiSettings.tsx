@@ -216,10 +216,21 @@ export function AiSettings() {
             {testResult}
           </p>
         )}
+        <label className="flex items-center gap-2 text-xs text-fg-muted">
+          <input
+            type="checkbox"
+            checked={config.tracker_enabled}
+            onChange={(e) =>
+              void updateConfig({ tracker_enabled: e.target.checked })
+            }
+          />
+          Commitment &amp; entity tracker — periodic fast-slot extraction
+          during sessions (applies on next session start)
+        </label>
         <p className="text-[11px] text-fg-faint">
           Keys are stored in the Windows Credential Manager, never in files.
-          Transcript text is sent to the selected provider only when you ask
-          for an assist.
+          Transcript text is sent to the selected provider when you ask for
+          an assist, and periodically while the tracker is enabled.
         </p>
       </div>
     </div>

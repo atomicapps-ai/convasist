@@ -16,6 +16,7 @@ export const EVENTS = {
   modelStatus: "convasist://model-status",
   assistSources: "convasist://assist-sources",
   radar: "convasist://radar",
+  tracker: "convasist://tracker",
 } as const;
 
 export interface TranscriptSegment {
@@ -98,6 +99,22 @@ export interface RadarEvent {
   sources: ScoredChunk[];
 }
 
+export interface TrackedEntity {
+  label: string;
+  detail: string;
+}
+
+export interface TrackedCommitment {
+  who: string; // "you" | "them"
+  what: string;
+  due: string;
+}
+
+export interface TrackerEvent {
+  entities: TrackedEntity[];
+  commitments: TrackedCommitment[];
+}
+
 export interface SessionSummary {
   id: string;
   started_at_unix_ms: number;
@@ -141,6 +158,7 @@ export interface AppConfig {
   consent_acknowledged: boolean;
   input_device: string | null;
   loopback_device: string | null;
+  tracker_enabled: boolean;
 }
 
 /** Mirror of convasist-core audio::AudioDevice. */

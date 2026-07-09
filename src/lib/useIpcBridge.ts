@@ -9,6 +9,7 @@ import {
   type ModelStatusEvent,
   type RadarEvent,
   type SessionStateEvent,
+  type TrackerEvent,
   type TranscriptSegment,
 } from "@/lib/ipc";
 import { useAppStore } from "@/state/app";
@@ -28,6 +29,7 @@ export function useIpcBridge(): void {
   const applyAssistChunk = useAssistStore((s) => s.applyChunk);
   const applyAssistSources = useAssistStore((s) => s.applySources);
   const applyRadar = useAssistStore((s) => s.applyRadar);
+  const applyTracker = useAssistStore((s) => s.applyTracker);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -55,6 +57,7 @@ export function useIpcBridge(): void {
           applyAssistSources(e.payload),
         ),
         listen<RadarEvent>(EVENTS.radar, (e) => applyRadar(e.payload)),
+        listen<TrackerEvent>(EVENTS.tracker, (e) => applyTracker(e.payload)),
       ]);
       if (cancelled) {
         subs.forEach((un) => un());
@@ -75,5 +78,6 @@ export function useIpcBridge(): void {
     applyAssistChunk,
     applyAssistSources,
     applyRadar,
+    applyTracker,
   ]);
 }

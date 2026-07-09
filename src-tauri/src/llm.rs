@@ -275,3 +275,18 @@ pub fn load_api_key(provider: ProviderId) -> Result<Option<String>, CoreError> {
         Err(e) => Err(CoreError::Llm(e.to_string())),
     }
 }
+
+/// Resolve the key a request must use: the stored key, an empty string for
+/// keyless local providers, or `api_key_missing`.
+pub fn resolve_key(provider: ProviderId) -> Result<String, CoreError> {
+    let requires_key = convasist_core::llm::provider_registry()
+        .into_iter()
+        .find(|p| p.id == provider)
+        .map(|p| p.requires_api_key)
+        .unwrap_or(true);
+    match load_api_key(provider)? {
+        Some(key) => Ok(key),
+        None if !requires_key => Ok(String::new()),
+        None => Err(CoreError::Llm("api_key_missing".into())),
+    }
+}

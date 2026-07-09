@@ -26,6 +26,8 @@ pub mod events {
     pub const ASSIST_SOURCES: &str = "convasist://assist-sources";
     /// Payload: [`super::RadarEvent`]
     pub const RADAR: &str = "convasist://radar";
+    /// Payload: [`super::TrackerEvent`]
+    pub const TRACKER: &str = "convasist://tracker";
 }
 
 /// Re-exported so the IPC module is a one-stop description of the wire.
@@ -79,6 +81,14 @@ pub struct RadarEvent {
     /// The inbound utterance that triggered the radar.
     pub question: String,
     pub sources: Vec<crate::rag::ScoredChunk>,
+}
+
+/// Cumulative tracker state for the live session (§6.3) — the full deduped
+/// list, re-emitted after each extraction pass.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrackerEvent {
+    pub entities: Vec<crate::tracker::TrackedEntity>,
+    pub commitments: Vec<crate::tracker::TrackedCommitment>,
 }
 
 /// ASR model provisioning progress (T6 first-run downloader).

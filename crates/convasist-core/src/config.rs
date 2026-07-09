@@ -28,6 +28,9 @@ pub struct AppConfig {
     /// Preferred loopback source — an OUTPUT device whose playback is
     /// captured (`None` = default output; A2/A3).
     pub loopback_device: Option<String>,
+    /// Commitment & entity tracker (§6.3) — runs fast-slot LLM passes over
+    /// finalized speech during a session. Requires a stored API key.
+    pub tracker_enabled: bool,
 }
 
 impl Default for AppConfig {
@@ -51,6 +54,7 @@ impl Default for AppConfig {
             consent_acknowledged: false,
             input_device: None,
             loopback_device: None,
+            tracker_enabled: true,
         }
     }
 }
