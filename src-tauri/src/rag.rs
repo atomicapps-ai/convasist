@@ -14,6 +14,7 @@
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
 
 use serde::{Deserialize, Serialize};
@@ -57,10 +58,21 @@ struct Corpus {
     index: Option<Bm25Index>,
 }
 
+/// Which original bytes to retain for a document so it can be downloaded
+/// back later (owner request). File ingests copy the source; pasted notes
+/// persist their text as `.txt`.
+enum Original<'a> {
+    File(&'a Path),
+    PastedText,
+}
+
 impl RagStore {
     pub fn open(app_data_dir: &Path) -> Result<Self, CoreError> {
         let dir = app_data_dir.join("rag");
         fs::create_dir_all(&dir).map_err(|e| CoreError::Rag(e.to_string()))?;
+        // Originals live beside the chunk JSON so "download the file back"
+        // works; missing dir on older stores is created here idempotently.
+        fs::create_dir_all(dir.join("originals")).map_err(|e| CoreError::Rag(e.to_string()))?;
         let store = Self {
             dir,
             inner: RwLock::new(Corpus::default()),
@@ -71,6 +83,67 @@ impl RagStore {
 
     fn doc_path(&self, id: &str) -> PathBuf {
         self.dir.join(format!("{id}.json"))
+    }
+
+    fn originals_dir(&self) -> PathBuf {
+        self.dir.join("originals")
+    }
+
+    /// The retained original for `id`, if any (files are named `<id>.<ext>`).
+    fn find_original(&self, id: &str) -> Option<PathBuf> {
+        fs::read_dir(self.originals_dir())
+            .ok()?
+            .flatten()
+            .map(|e| e.path())
+            .find(|p| p.file_stem().and_then(|s| s.to_str()) == Some(id))
+    }
+
+    /// Persist the original bytes for a just-ingested document. Best-effort:
+    /// a failure here downgrades to text-only download, never blocks ingest.
+    fn save_original(
+        &self,
+        id: &str,
+        file_name: &str,
+        original: &Original,
+        text: &str,
+    ) -> std::io::Result<()> {
+        let ext = Path::new(file_name)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("bin");
+        let dest = self.originals_dir().join(format!("{id}.{ext}"));
+        match original {
+            Original::File(src) => fs::copy(src, &dest).map(|_| ()),
+            Original::PastedText => fs::write(&dest, text.as_bytes()),
+        }
+    }
+
+    /// Copy the original uploaded file for `id` to `dest`. Falls back to the
+    /// reconstructed text (chunks joined) for documents ingested before
+    /// originals were retained, so a download always yields something.
+    pub fn export_original(&self, id: &str, dest: &str) -> Result<(), CoreError> {
+        if let Some(src) = self.find_original(id) {
+            fs::copy(&src, dest).map_err(|e| CoreError::Rag(e.to_string()))?;
+            return Ok(());
+        }
+        let text = {
+            let inner = self.inner.read().expect("rag lock");
+            inner
+                .documents
+                .iter()
+                .find(|d| d.document.id == id)
+                .map(|d| {
+                    d.chunks
+                        .iter()
+                        .map(|c| c.text.as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n\n")
+                })
+        };
+        match text {
+            Some(t) => fs::write(dest, t).map_err(|e| CoreError::Rag(e.to_string())),
+            None => Err(CoreError::Rag(format!("document '{id}' not found"))),
+        }
     }
 
     /// Load every persisted document and rebuild the BM25 index over the
@@ -126,7 +199,34 @@ impl RagStore {
             .unwrap_or("document")
             .to_string();
 
-        let (text, mut warnings) = extract_text(source)?;
+        let (text, warnings) = extract_text(source)?;
+        self.store_text_document(file_name, text, Original::File(source), warnings)
+    }
+
+    /// Ingest raw text (e.g. pasted from the clipboard) as a `.txt`
+    /// document. `name` is a display label only — the on-disk id is
+    /// timestamp-based, so it needs no path sanitization.
+    pub fn ingest_text(&self, name: &str, text: &str) -> Result<IngestReport, CoreError> {
+        if text.trim().is_empty() {
+            return Err(CoreError::Rag("no text to add".into()));
+        }
+        self.store_text_document(
+            normalize_txt_name(name),
+            text.to_string(),
+            Original::PastedText,
+            Vec::new(),
+        )
+    }
+
+    /// Shared tail for both file and pasted-text ingestion: chunk, embed
+    /// (best-effort), retain the original, persist, and rebuild the index.
+    fn store_text_document(
+        &self,
+        file_name: String,
+        text: String,
+        original: Original,
+        mut warnings: Vec<String>,
+    ) -> Result<IngestReport, CoreError> {
         let chunks = chunk_text(&text);
         if chunks.is_empty() {
             return Err(CoreError::Rag(format!(
@@ -147,7 +247,16 @@ impl RagStore {
         }
         let mut embeddings = embeddings.unwrap_or_default().into_iter();
 
-        let id = format!("doc-{}", crate::session::now_unix_ms());
+        // A per-process counter guarantees uniqueness even when several
+        // documents are ingested within the same millisecond (e.g. dropping
+        // many files at once) — a bare timestamp id collides and one
+        // document would silently overwrite another.
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let id = format!(
+            "doc-{}-{}",
+            crate::session::now_unix_ms(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        );
         let stored = StoredDocument {
             document: RagDocument {
                 id: id.clone(),
@@ -165,6 +274,10 @@ impl RagStore {
                 })
                 .collect(),
         };
+
+        if let Err(e) = self.save_original(&id, &stored.document.file_name, &original, &text) {
+            warnings.push(format!("original not retained for download: {e}"));
+        }
 
         let json = serde_json::to_string(&stored).map_err(|e| CoreError::Rag(e.to_string()))?;
         fs::write(self.doc_path(&id), json).map_err(|e| CoreError::Rag(e.to_string()))?;
@@ -202,6 +315,10 @@ impl RagStore {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(CoreError::Rag(e.to_string())),
+        }
+        // Drop the retained original too (best-effort — never block delete).
+        if let Some(original) = self.find_original(id) {
+            let _ = fs::remove_file(original);
         }
         self.reload()
     }
@@ -302,6 +419,19 @@ impl RagStore {
             }
         }
         let _ = self.reload();
+    }
+}
+
+/// Ensure a pasted-note label is non-empty and ends in `.txt`. The result
+/// is a display label only (the stored file is `doc-<ms>.json`), so no
+/// path-safety filtering is required.
+fn normalize_txt_name(name: &str) -> String {
+    let base = name.trim();
+    let base = if base.is_empty() { "Pasted note" } else { base };
+    if base.to_lowercase().ends_with(".txt") {
+        base.to_string()
+    } else {
+        format!("{base}.txt")
     }
 }
 
@@ -439,6 +569,116 @@ mod tests {
         assert!(text.contains("Second"));
         assert!(!text.contains("alert"));
         assert!(!text.contains("color:red"));
+    }
+
+    #[test]
+    fn extract_docx_reads_paragraph_and_run_text() {
+        use std::io::Write;
+        // Build a minimal real .docx (a zip whose word/document.xml carries
+        // <w:p> paragraphs of <w:t> runs) and prove we recover the text —
+        // this is exactly the shape a resume exported from Word produces.
+        let dir = std::env::temp_dir().join(format!("convasist-docx-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("resume.docx");
+
+        let file = fs::File::create(&path).unwrap();
+        let mut zipw = zip::ZipWriter::new(file);
+        let opts = zip::write::SimpleFileOptions::default();
+        zipw.start_file("word/document.xml", opts).unwrap();
+        let xml = "<?xml version=\"1.0\"?><w:document xmlns:w=\"x\"><w:body>\
+            <w:p><w:r><w:t>Jane Doe</w:t></w:r></w:p>\
+            <w:p><w:r><w:t>Senior Engineer</w:t></w:r><w:r><w:t> at Acme</w:t></w:r></w:p>\
+            </w:body></w:document>";
+        zipw.write_all(xml.as_bytes()).unwrap();
+        zipw.finish().unwrap();
+
+        let text = extract_docx(&path).unwrap();
+        assert!(text.contains("Jane Doe"), "got: {text:?}");
+        // Adjacent runs in one paragraph join without a spurious break.
+        assert!(text.contains("Senior Engineer at Acme"), "got: {text:?}");
+
+        // And the full ingest path accepts it end to end.
+        let store = RagStore::open(&dir).unwrap();
+        let report = store.ingest(path.to_str().unwrap()).unwrap();
+        assert!(report.document.chunk_count >= 1);
+        assert!(report.document.file_name.ends_with(".docx"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ingest_text_stores_pasted_note_as_txt() {
+        let dir = std::env::temp_dir().join(format!("convasist-paste-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let store = RagStore::open(&dir).unwrap();
+        let report = store
+            .ingest_text(
+                "Warranty terms",
+                "All parts carry a 5 year warranty. Labor is covered for 1 year.",
+            )
+            .unwrap();
+        assert_eq!(report.document.file_name, "Warranty terms.txt");
+        assert!(report.document.chunk_count >= 1);
+
+        // Retrievable like any other document.
+        let hits = store.retrieve("how long is the parts warranty", 3);
+        assert!(hits.iter().any(|h| h.text.contains("5 year warranty")));
+
+        // Empty paste is rejected, not stored.
+        assert!(store.ingest_text("blank", "   \n  ").is_err());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn retains_and_exports_original_bytes() {
+        let dir = std::env::temp_dir().join(format!("convasist-orig-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        // A source file with distinctive bytes.
+        let src = dir.join("notes.md");
+        let body =
+            "# Title\n\nThe quiet part, said loud, for at least two hundred characters so the \
+                    'very little text' warning never fires and the chunker has real content to \
+                    split into a paragraph or two of prose.";
+        fs::write(&src, body).unwrap();
+
+        let store = RagStore::open(&dir).unwrap();
+        let report = store.ingest(src.to_str().unwrap()).unwrap();
+        let id = report.document.id.clone();
+
+        // Download the original back — byte-identical to what we uploaded.
+        let out = dir.join("downloaded.md");
+        store.export_original(&id, out.to_str().unwrap()).unwrap();
+        assert_eq!(fs::read_to_string(&out).unwrap(), body);
+
+        // Pasted text is retained as its .txt original.
+        let paste = store
+            .ingest_text("Snippet", "carburetor rebuild steps 1 2 3")
+            .unwrap();
+        let pout = dir.join("snip.txt");
+        store
+            .export_original(&paste.document.id, pout.to_str().unwrap())
+            .unwrap();
+        assert!(fs::read_to_string(&pout).unwrap().contains("carburetor"));
+
+        // Delete removes the retained original.
+        store.delete(&id).unwrap();
+        assert!(store.find_original(&id).is_none());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn normalize_txt_name_appends_and_defaults() {
+        assert_eq!(normalize_txt_name("notes"), "notes.txt");
+        assert_eq!(normalize_txt_name("notes.txt"), "notes.txt");
+        assert_eq!(normalize_txt_name("notes.TXT"), "notes.TXT");
+        assert_eq!(normalize_txt_name("  "), "Pasted note.txt");
     }
 
     #[test]

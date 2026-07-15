@@ -33,6 +33,8 @@ interface AppState {
   toggleSidecar: () => Promise<void>;
 
   init: () => Promise<void>;
+  /** Re-enumerate audio devices (e.g. after plugging one in). */
+  refreshDevices: () => Promise<void>;
   updateConfig: (patch: Partial<AppConfig>) => Promise<void>;
   acknowledgeConsent: () => Promise<void>;
   start: () => Promise<void>;
@@ -92,6 +94,15 @@ export const useAppStore = create<AppState>((set, get) => ({
         registry,
         keyStatus: Object.fromEntries(keys.map((s) => [s.id, s.has_key])),
       });
+    } catch (e) {
+      set({ lastError: String(e) });
+    }
+  },
+
+  refreshDevices: async () => {
+    if (!isTauri()) return;
+    try {
+      set({ devices: await listAudioDevices() });
     } catch (e) {
       set({ lastError: String(e) });
     }

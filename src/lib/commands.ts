@@ -15,6 +15,7 @@ import type {
   ProviderInfo,
   ProviderKeyStatus,
   RagDocument,
+  SecretsStatus,
   SessionSummary,
   TranscriptSegment,
 } from "@/lib/ipc";
@@ -78,6 +79,14 @@ export function ragIngest(paths: string[]): Promise<IngestReport[]> {
   return invoke<IngestReport[]>("rag_ingest", { paths });
 }
 
+/** Ingest clipboard/pasted text as a `.txt` document in the library. */
+export function ragIngestText(
+  name: string,
+  text: string,
+): Promise<IngestReport> {
+  return invoke<IngestReport>("rag_ingest_text", { name, text });
+}
+
 export function ragList(): Promise<RagDocument[]> {
   return invoke<RagDocument[]>("rag_list");
 }
@@ -88,6 +97,28 @@ export function ragSetEnabled(id: string, enabled: boolean): Promise<void> {
 
 export function ragDelete(id: string): Promise<void> {
   return invoke("rag_delete", { id });
+}
+
+/** Download a document back to `dest` (original file, or reconstructed text). */
+export function ragDownload(id: string, dest: string): Promise<void> {
+  return invoke("rag_download", { id, dest });
+}
+
+export function secretsStatus(): Promise<SecretsStatus> {
+  return invoke<SecretsStatus>("secrets_status");
+}
+
+/** Encrypt stored keys to `dest` (or the default path) for committing to git. */
+export function secretsExport(dest?: string): Promise<string> {
+  return invoke<string>("secrets_export", { dest: dest ?? null });
+}
+
+/** Decrypt a secrets file and load its keys into the OS vault. */
+export function secretsImport(
+  src?: string,
+  overwrite = false,
+): Promise<string> {
+  return invoke<string>("secrets_import", { src: src ?? null, overwrite });
 }
 
 export function sessionList(): Promise<SessionSummary[]> {

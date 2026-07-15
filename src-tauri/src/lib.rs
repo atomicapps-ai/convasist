@@ -10,6 +10,7 @@ mod embed;
 mod llm;
 mod models;
 mod rag;
+mod secrets;
 mod session;
 mod tracker;
 
@@ -212,6 +213,22 @@ async fn rag_ingest(
     .map_err(|e| e.to_string())?
 }
 
+/// Ingest text pasted from the clipboard as a `.txt` document (U5). The name
+/// is a display label; the store persists it like any ingested file.
+#[tauri::command]
+async fn rag_ingest_text(
+    state: State<'_, AppState>,
+    name: String,
+    text: String,
+) -> Result<IngestReport, String> {
+    let store = state.rag.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        store.ingest_text(&name, &text).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 fn rag_list(state: State<AppState>) -> Vec<RagDocument> {
     state.rag.list()
@@ -228,6 +245,66 @@ fn rag_set_enabled(state: State<AppState>, id: String, enabled: bool) -> Result<
 #[tauri::command]
 fn rag_delete(state: State<AppState>, id: String) -> Result<(), String> {
     state.rag.delete(&id).map_err(|e| e.to_string())
+}
+
+/// Download a library document back to `dest` (chosen via the save dialog):
+/// the original uploaded file when retained, else its reconstructed text.
+#[tauri::command]
+async fn rag_download(state: State<'_, AppState>, id: String, dest: String) -> Result<(), String> {
+    let store = state.rag.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        store.export_original(&id, &dest).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+// -------------------------------------------------- Portable encrypted secrets
+
+#[derive(Serialize)]
+struct SecretsStatus {
+    passphrase_set: bool,
+    file_present: bool,
+    file_path: String,
+    passphrase_env: String,
+}
+
+#[tauri::command]
+fn secrets_status() -> SecretsStatus {
+    let path = secrets::default_path();
+    SecretsStatus {
+        passphrase_set: secrets::passphrase_set(),
+        file_present: path.exists(),
+        file_path: path.display().to_string(),
+        passphrase_env: secrets::PASSPHRASE_ENV.to_string(),
+    }
+}
+
+/// Encrypt the stored API keys to a file safe to commit to git. `dest` comes
+/// from the save dialog; falls back to the default path when omitted.
+#[tauri::command]
+async fn secrets_export(dest: Option<String>) -> Result<String, String> {
+    let path = dest
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(secrets::default_path);
+    tauri::async_runtime::spawn_blocking(move || {
+        secrets::export_to(&path).map(|n| format!("Encrypted {n} key(s) → {}", path.display()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Decrypt a secrets file and load its keys into the OS vault.
+#[tauri::command]
+async fn secrets_import(src: Option<String>, overwrite: bool) -> Result<String, String> {
+    let path = src
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(secrets::default_path);
+    tauri::async_runtime::spawn_blocking(move || {
+        secrets::import_from(&path, overwrite).map(|n| format!("Loaded {n} key(s) from the file"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Build the retrieval query for an assist: the explicit question, or the
@@ -330,6 +407,11 @@ pub fn run() {
                 .expect("app data dir must resolve");
             let rag = Arc::new(RagStore::open(&data_dir).expect("open rag store"));
 
+            // Seed API keys from a committed encrypted secrets file when the
+            // passphrase env var is set (fills only missing keys). Lets keys
+            // travel to another machine via git without re-entering them.
+            secrets::seed_on_startup();
+
             // Warm the embedding model off the critical path (first run
             // downloads ~130 MB), then embed any chunks ingested before it
             // was ready. Retrieval degrades to BM25-only until this lands.
@@ -364,9 +446,14 @@ pub fn run() {
             list_provider_models,
             assist,
             rag_ingest,
+            rag_ingest_text,
             rag_list,
             rag_set_enabled,
             rag_delete,
+            rag_download,
+            secrets_status,
+            secrets_export,
+            secrets_import,
             session_list,
             session_load,
             export_transcript,

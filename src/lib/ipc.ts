@@ -86,6 +86,14 @@ export interface IngestReport {
   warnings: string[];
 }
 
+/** Mirror of the shell's SecretsStatus (portable encrypted secrets). */
+export interface SecretsStatus {
+  passphrase_set: boolean;
+  file_present: boolean;
+  file_path: string;
+  passphrase_env: string;
+}
+
 export interface ScoredChunk {
   document_id: string;
   file_name: string;

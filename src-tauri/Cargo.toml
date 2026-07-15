@@ -37,6 +37,11 @@ ureq = { version = "2", features = ["json"] }
 # API keys live in the OS credential vault (design §4.6) — Windows
 # Credential Manager on the Phase 1 target.
 keyring = { version = "3", features = ["windows-native", "linux-native"] }
+# Portable encrypted-secrets file (owner request): keys/values encrypted with
+# a passphrase (from an env var) so the file is safe to commit to git and
+# travels to another machine. cocoon = PBKDF2 + ChaCha20-Poly1305, salt+nonce
+# handled internally.
+cocoon = "0.4"
 # RAG ingestion (design §4.4 R1): PDF text extraction (pure Rust) and DOCX
 # (a zip of XML — we unzip and strip tags ourselves).
 pdf-extract = "0.7"
