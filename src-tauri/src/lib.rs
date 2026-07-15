@@ -10,6 +10,7 @@ mod embed;
 mod llm;
 mod models;
 mod rag;
+mod recorder;
 mod secrets;
 mod session;
 mod tracker;
@@ -138,6 +139,26 @@ fn export_transcript(path: String, segments: Vec<TranscriptSegment>) -> Result<(
 #[tauri::command]
 async fn stop_session(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     state.session.stop(&app).map_err(|e| e.to_string())
+}
+
+/// Start recording the live call to a stereo WAV; returns the file path.
+#[tauri::command]
+fn start_recording(app: AppHandle, state: State<AppState>) -> Result<String, String> {
+    state
+        .session
+        .start_recording(&app)
+        .map_err(|e| e.to_string())
+}
+
+/// Stop the current recording; returns the saved file path (if any).
+#[tauri::command]
+fn stop_recording(state: State<AppState>) -> Result<Option<String>, String> {
+    state.session.stop_recording().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn recording_status(state: State<AppState>) -> bool {
+    state.session.is_recording()
 }
 
 #[derive(Serialize)]
@@ -440,6 +461,9 @@ pub fn run() {
             list_audio_devices,
             start_session,
             stop_session,
+            start_recording,
+            stop_recording,
+            recording_status,
             set_api_key,
             provider_key_status,
             test_provider,

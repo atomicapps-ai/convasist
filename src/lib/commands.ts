@@ -44,6 +44,20 @@ export function stopSession(): Promise<void> {
   return invoke("stop_session");
 }
 
+/** Start recording the live call to a stereo WAV; resolves to the file path. */
+export function startRecording(): Promise<string> {
+  return invoke<string>("start_recording");
+}
+
+/** Stop recording; resolves to the saved file path (null if none was active). */
+export function stopRecording(): Promise<string | null> {
+  return invoke<string | null>("stop_recording");
+}
+
+export function recordingStatus(): Promise<boolean> {
+  return invoke<boolean>("recording_status");
+}
+
 export function setApiKey(provider: ProviderId, key: string): Promise<void> {
   return invoke("set_api_key", { provider, key });
 }

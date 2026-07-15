@@ -19,6 +19,9 @@ export function StatusBar({
   const modelStatus = useAppStore((s) => s.modelStatus);
   const start = useAppStore((s) => s.start);
   const stop = useAppStore((s) => s.stop);
+  const recording = useAppStore((s) => s.recording);
+  const startRecording = useAppStore((s) => s.startRecording);
+  const stopRecording = useAppStore((s) => s.stopRecording);
   const listening = session.state === "listening";
 
   const statusText = (() => {
@@ -86,6 +89,39 @@ export function StatusBar({
           >
             {listening ? "Stop" : "Start listening"}
           </button>
+          {listening && (
+            <button
+              type="button"
+              onClick={() =>
+                void (recording ? stopRecording() : startRecording())
+              }
+              aria-pressed={recording}
+              aria-label={
+                recording ? "Stop recording the call" : "Record the call to a stereo audio file"
+              }
+              title={
+                recording
+                  ? "Stop recording"
+                  : "Record the call (stereo WAV: you left, them right)"
+              }
+              className={[
+                "flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs",
+                recording
+                  ? "border-rec/60 text-rec hover:bg-rec/10"
+                  : "border-border text-fg-muted hover:text-fg",
+              ].join(" ")}
+            >
+              <span
+                className={
+                  recording
+                    ? "h-2 w-2 animate-pulse rounded-full bg-rec"
+                    : "h-2 w-2 rounded-full bg-rec/70"
+                }
+                aria-hidden
+              />
+              {recording ? "Stop recording" : "Record"}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => void toggleSidecar()}

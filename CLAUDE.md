@@ -10,7 +10,10 @@ A real-time AI conversation assistant. It intercepts **both** sides of the host
 computer's audio — your microphone (outbound) and the system output / other
 party (inbound, via WASAPI loopback) — transcribes them live into a dual-column
 chat UI, and lets a RAG-grounded LLM process the conversation inline at any
-moment. Windows is the Phase 1 target (loopback is WASAPI-only).
+moment. It can also record the live call to a stereo WAV (you = left, them =
+right) via `src-tauri/src/recorder.rs` — a background writer thread fed by the
+existing capture frames, so recording adds no work to the audio or UI path.
+Windows is the Phase 1 target (loopback is WASAPI-only).
 
 ## Stack
 

@@ -5,8 +5,11 @@ import {
   getProviderRegistry,
   listAudioDevices,
   providerKeyStatus,
+  recordingStatus,
   saveConfig,
+  startRecording,
   startSession,
+  stopRecording,
   stopSession,
 } from "@/lib/commands";
 import {
@@ -31,6 +34,11 @@ interface AppState {
   /** Sidecar mode (U9): narrow always-on-top strip beside a call window. */
   sidecar: boolean;
   toggleSidecar: () => Promise<void>;
+  /** Call recording (stereo WAV: you = left, them = right). */
+  recording: boolean;
+  recordingPath: string | null;
+  startRecording: () => Promise<void>;
+  stopRecording: () => Promise<void>;
 
   init: () => Promise<void>;
   /** Re-enumerate audio devices (e.g. after plugging one in). */
@@ -61,6 +69,24 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   registry: [],
   keyStatus: {},
+  recording: false,
+  recordingPath: null,
+  startRecording: async () => {
+    try {
+      const path = await startRecording();
+      set({ recording: true, recordingPath: path });
+    } catch (e) {
+      set({ lastError: String(e) });
+    }
+  },
+  stopRecording: async () => {
+    try {
+      const path = await stopRecording();
+      set({ recording: false, recordingPath: path });
+    } catch (e) {
+      set({ recording: false, lastError: String(e) });
+    }
+  },
   sidecar: false,
   toggleSidecar: async () => {
     const next = !get().sidecar;
@@ -82,17 +108,19 @@ export const useAppStore = create<AppState>((set, get) => ({
   init: async () => {
     if (!isTauri()) return;
     try {
-      const [config, devices, registry, keys] = await Promise.all([
+      const [config, devices, registry, keys, recording] = await Promise.all([
         getConfig(),
         listAudioDevices(),
         getProviderRegistry(),
         providerKeyStatus(),
+        recordingStatus(),
       ]);
       set({
         config,
         devices,
         registry,
         keyStatus: Object.fromEntries(keys.map((s) => [s.id, s.has_key])),
+        recording,
       });
     } catch (e) {
       set({ lastError: String(e) });
@@ -142,7 +170,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     } catch (e) {
       set({ lastError: String(e) });
     } finally {
-      set({ busy: false });
+      // The session stop finalizes any recording backend-side.
+      set({ busy: false, recording: false });
     }
   },
 }));

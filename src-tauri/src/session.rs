@@ -24,6 +24,7 @@ use crate::asr::{SharedWhisper, WhisperEngine};
 use crate::audio::CpalSource;
 use crate::models;
 use crate::rag::RagStore;
+use crate::recorder::Recorder;
 
 /// A stream is unhealthy when no frames arrived for this long (A4 watchdog).
 const STALL_AFTER: Duration = Duration::from_millis(1500);
@@ -34,6 +35,9 @@ pub struct SessionManager {
     active: Mutex<Option<ActiveSession>>,
     /// Loaded whisper weights, cached across sessions (keyed by model path).
     whisper_cache: Mutex<Option<(String, Arc<SharedWhisper>)>>,
+    /// The in-progress call recording, if any. Shared with both frame sinks
+    /// so they can tee audio to it while it's armed.
+    recording: Arc<Mutex<Option<Recorder>>>,
 }
 
 struct ActiveSession {
@@ -51,6 +55,7 @@ impl SessionManager {
         Self {
             active: Mutex::new(None),
             whisper_cache: Mutex::new(None),
+            recording: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -120,7 +125,12 @@ impl SessionManager {
             let frames_tx = engine.frame_sender()?;
 
             let mut source = CpalSource::new(side, device);
-            source.start(make_frame_sink(app.clone(), last_frame.clone(), frames_tx))?;
+            source.start(make_frame_sink(
+                app.clone(),
+                last_frame.clone(),
+                frames_tx,
+                self.recording.clone(),
+            ))?;
 
             engines.push(engine);
             sources.push(source);
@@ -152,10 +162,14 @@ impl SessionManager {
         let session = self.active.lock().expect("session lock").take();
         if let Some(mut session) = session {
             session.stop_flag.store(true, Ordering::Relaxed);
-            // Stop capture first (drops the frame senders), then let the
-            // engines flush their final utterances.
+            // Stop capture first (drops the frame senders), finalize any call
+            // recording (drains its buffered tail), then let the engines
+            // flush their final utterances.
             for source in &mut session.sources {
                 source.stop()?;
+            }
+            if let Some(rec) = self.recording.lock().expect("recording lock").take() {
+                let _ = rec.stop();
             }
             for engine in &mut session.engines {
                 engine.finish()?;
@@ -163,6 +177,34 @@ impl SessionManager {
         }
         app.emit(events::SESSION_STATE, SessionStateEvent::Idle)
             .map_err(|e| CoreError::Audio(e.to_string()))
+    }
+
+    /// Start recording the live conversation to a stereo WAV (you = left,
+    /// them = right). Requires an active session; returns the file path.
+    /// Idempotent — a second call while recording returns the same path.
+    pub fn start_recording(&self, app: &AppHandle) -> Result<String, CoreError> {
+        if self.active.lock().expect("session lock").is_none() {
+            return Err(CoreError::Audio("start listening before recording".into()));
+        }
+        let mut guard = self.recording.lock().expect("recording lock");
+        if let Some(rec) = guard.as_ref() {
+            return Ok(rec.path().display().to_string());
+        }
+        let path = recordings_dir(app)?.join(format!("call-{}.wav", now_unix_ms()));
+        let rec = Recorder::start(path)?;
+        let out = rec.path().display().to_string();
+        *guard = Some(rec);
+        Ok(out)
+    }
+
+    /// Finalize the current recording, if any. Returns its path.
+    pub fn stop_recording(&self) -> Result<Option<String>, CoreError> {
+        let rec = self.recording.lock().expect("recording lock").take();
+        Ok(rec.map(|r| r.stop().display().to_string()))
+    }
+
+    pub fn is_recording(&self) -> bool {
+        self.recording.lock().expect("recording lock").is_some()
     }
 }
 
@@ -179,10 +221,18 @@ fn make_frame_sink(
     app: AppHandle,
     last_frame: Arc<[AtomicU64; 2]>,
     frames_tx: Sender<AudioFrame>,
+    recording: Arc<Mutex<Option<Recorder>>>,
 ) -> Box<dyn FnMut(AudioFrame) + Send> {
     let mut window: Vec<f32> = Vec::with_capacity(METER_WINDOW_SAMPLES * 2);
     Box::new(move |frame: AudioFrame| {
         last_frame[side_index(frame.side)].store(now_unix_ms(), Ordering::Relaxed);
+        // Tee to the call recording when armed (cheap copy + channel send;
+        // the writer thread does the encoding). Never blocks capture.
+        if let Ok(guard) = recording.lock() {
+            if let Some(rec) = guard.as_ref() {
+                rec.push(frame.side, &frame.samples);
+            }
+        }
         window.extend_from_slice(&frame.samples);
         if window.len() >= METER_WINDOW_SAMPLES {
             let _ = app.emit(
@@ -241,6 +291,16 @@ fn sessions_dir(app: &AppHandle) -> Result<PathBuf, CoreError> {
         .app_data_dir()
         .map_err(|e| CoreError::Audio(format!("no app data dir: {e}")))?
         .join("sessions");
+    fs::create_dir_all(&dir).map_err(|e| CoreError::Audio(e.to_string()))?;
+    Ok(dir)
+}
+
+fn recordings_dir(app: &AppHandle) -> Result<PathBuf, CoreError> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| CoreError::Audio(format!("no app data dir: {e}")))?
+        .join("recordings");
     fs::create_dir_all(&dir).map_err(|e| CoreError::Audio(e.to_string()))?;
     Ok(dir)
 }

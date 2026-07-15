@@ -49,3 +49,6 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 # Native file-picker for the RAG library "Add documents" button.
 tauri-plugin-dialog = "2"
 fastembed = "4"
+# Call recording (owner request): write the two capture sides as a stereo
+# 16-bit WAV. Pure-Rust, tiny; all encoding happens on a dedicated thread.
+hound = "3"
