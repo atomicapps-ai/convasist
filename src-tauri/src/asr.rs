@@ -10,6 +10,7 @@
 //! when it closes, one last decode emits the final segment that replaces
 //! the partials in the UI.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -42,16 +43,20 @@ pub struct WhisperEngine {
     sink: Option<Box<dyn FnMut(TranscriptSegment) + Send>>,
     shared: Arc<SharedWhisper>,
     side: StreamSide,
+    /// Set on stop so the worker skips its final decode and exits promptly
+    /// instead of blocking the join on a slow whisper pass.
+    stop: Arc<AtomicBool>,
 }
 
 impl WhisperEngine {
-    pub fn new(shared: Arc<SharedWhisper>, side: StreamSide) -> Self {
+    pub fn new(shared: Arc<SharedWhisper>, side: StreamSide, stop: Arc<AtomicBool>) -> Self {
         Self {
             tx: None,
             worker: None,
             sink: None,
             shared,
             side,
+            stop,
         }
     }
 
@@ -69,10 +74,11 @@ impl WhisperEngine {
         let (tx, rx) = mpsc::channel::<AudioFrame>();
         let shared = self.shared.clone();
         let side = self.side;
+        let stop = self.stop.clone();
 
         let worker = std::thread::Builder::new()
             .name(format!("asr-{side:?}"))
-            .spawn(move || decode_loop(shared, side, rx, sink))
+            .spawn(move || decode_loop(shared, side, rx, sink, stop))
             .map_err(|e| CoreError::Asr(format!("spawn asr worker: {e}")))?;
 
         self.tx = Some(tx.clone());
@@ -118,6 +124,7 @@ fn decode_loop(
     side: StreamSide,
     rx: mpsc::Receiver<AudioFrame>,
     mut sink: Box<dyn FnMut(TranscriptSegment) + Send>,
+    stop: Arc<AtomicBool>,
 ) {
     let mut state = match shared.context.create_state() {
         Ok(s) => s,
@@ -144,10 +151,20 @@ fn decode_loop(
                 }
             }
             Err(_) => {
-                // All senders dropped: session stopped — flush and exit.
-                segmenter.finish(&mut events);
+                // All senders dropped. On a user stop, exit immediately — a
+                // final flush decode would block the join for seconds; the
+                // last partial already shows on screen. On an *unexpected*
+                // disconnect, flush the open utterance for completeness.
+                if !stop.load(Ordering::Relaxed) {
+                    segmenter.finish(&mut events);
+                }
                 running = false;
             }
+        }
+
+        // Bail before spending any more decodes once a stop is requested.
+        if stop.load(Ordering::Relaxed) {
+            break;
         }
 
         // Collapse a burst to the newest partial window (decoding stale

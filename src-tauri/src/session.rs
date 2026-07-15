@@ -115,7 +115,7 @@ impl SessionManager {
             (StreamSide::Outbound, config.input_device.clone()),
             (StreamSide::Inbound, config.loopback_device.clone()),
         ] {
-            let mut engine = WhisperEngine::new(shared.clone(), side);
+            let mut engine = WhisperEngine::new(shared.clone(), side, stop_flag.clone());
             engine.set_sink(make_transcript_sink(
                 app.clone(),
                 rag.clone(),
@@ -161,19 +161,27 @@ impl SessionManager {
     pub fn stop(&self, app: &AppHandle) -> Result<(), CoreError> {
         let session = self.active.lock().expect("session lock").take();
         if let Some(mut session) = session {
+            // Signal first so the ASR workers skip their final decode.
             session.stop_flag.store(true, Ordering::Relaxed);
-            // Stop capture first (drops the frame senders), finalize any call
-            // recording (drains its buffered tail), then let the engines
-            // flush their final utterances.
+            // Release the audio devices synchronously (fast — so a fresh
+            // session can reopen them immediately) and finalize any recording.
             for source in &mut session.sources {
                 source.stop()?;
             }
             if let Some(rec) = self.recording.lock().expect("recording lock").take() {
                 let _ = rec.stop();
             }
-            for engine in &mut session.engines {
-                engine.finish()?;
-            }
+            // The ASR worker joins can block on an in-flight whisper decode;
+            // wind them down off the caller's thread so Stop returns now and
+            // the UI flips to Idle immediately.
+            std::thread::Builder::new()
+                .name("session-teardown".into())
+                .spawn(move || {
+                    for engine in &mut session.engines {
+                        let _ = engine.finish();
+                    }
+                })
+                .map_err(|e| CoreError::Audio(format!("spawn teardown: {e}")))?;
         }
         app.emit(events::SESSION_STATE, SessionStateEvent::Idle)
             .map_err(|e| CoreError::Audio(e.to_string()))
