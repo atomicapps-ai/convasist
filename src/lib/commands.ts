@@ -18,6 +18,7 @@ import type {
   SecretsStatus,
   SessionSummary,
   TranscriptSegment,
+  WhisperModelInfo,
 } from "@/lib/ipc";
 
 export function getConfig(): Promise<AppConfig> {
@@ -34,6 +35,10 @@ export function getProviderRegistry(): Promise<ProviderInfo[]> {
 
 export function listAudioDevices(): Promise<AudioDevice[]> {
   return invoke<AudioDevice[]>("list_audio_devices");
+}
+
+export function listWhisperModels(): Promise<WhisperModelInfo[]> {
+  return invoke<WhisperModelInfo[]>("list_whisper_models");
 }
 
 export function startSession(): Promise<string> {

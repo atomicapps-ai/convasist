@@ -42,7 +42,9 @@ impl Default for AppConfig {
             .expect("default provider must be in registry");
         Self {
             asr_engine: AsrEngineId::WhisperLocal,
-            whisper_model: "base.en".to_string(),
+            // Low-latency default: quantized tiny is the fastest/smallest
+            // whisper checkpoint. Users can trade up for accuracy in Settings.
+            whisper_model: "tiny.en-q5_1".to_string(),
             llm_quality: ModelSelection {
                 provider: DEFAULT_PROVIDER,
                 model: default_provider.default_quality_model.to_string(),

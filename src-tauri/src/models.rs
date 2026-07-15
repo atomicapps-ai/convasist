@@ -19,12 +19,75 @@ use convasist_core::CoreError;
 const MODEL_BASE_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
 
 /// Names accepted in `AppConfig.whisper_model`, with approximate sizes.
+/// The `-q5_1` / `-q8_0` variants are quantized (compressed) checkpoints —
+/// smaller downloads and faster CPU decode at a small accuracy cost. All are
+/// published as `ggml-<name>.bin` at `MODEL_BASE_URL`.
 pub const KNOWN_MODELS: &[(&str, u64)] = &[
+    ("tiny.en-q5_1", 33_000_000),
     ("tiny.en", 78_000_000),
+    ("base.en-q5_1", 60_000_000),
     ("base.en", 148_000_000),
+    ("small.en-q5_1", 190_000_000),
     ("small.en", 488_000_000),
     ("distil-small.en", 340_000_000),
 ];
+
+/// One selectable ASR model for the Settings picker.
+#[derive(serde::Serialize)]
+pub struct WhisperModelInfo {
+    pub id: String,
+    pub label: String,
+    pub note: String,
+    pub approx_mb: u32,
+}
+
+fn approx_mb(id: &str) -> u32 {
+    KNOWN_MODELS
+        .iter()
+        .find(|(name, _)| *name == id)
+        .map(|(_, bytes)| (*bytes / 1_000_000) as u32)
+        .unwrap_or(0)
+}
+
+/// The models offered in the picker, ordered fastest → most accurate.
+pub fn catalog() -> Vec<WhisperModelInfo> {
+    let entries = [
+        (
+            "tiny.en-q5_1",
+            "Tiny · quantized — fastest",
+            "Lowest latency and smallest download. Great for clear speech.",
+        ),
+        (
+            "tiny.en",
+            "Tiny — fast",
+            "Very low latency, a little more accurate than the quantized tiny.",
+        ),
+        (
+            "base.en-q5_1",
+            "Base · quantized — balanced",
+            "Base-level accuracy, compressed so it stays quick.",
+        ),
+        (
+            "base.en",
+            "Base — accurate",
+            "The old default. Noticeably slower on modest CPUs.",
+        ),
+        (
+            "distil-small.en",
+            "Distil-small — most accurate",
+            "Best accuracy here; wants a stronger CPU.",
+        ),
+    ];
+    entries
+        .iter()
+        .map(|(id, label, note)| WhisperModelInfo {
+            id: (*id).to_string(),
+            label: (*label).to_string(),
+            note: (*note).to_string(),
+            approx_mb: approx_mb(id),
+        })
+        .collect()
+}
 
 static DOWNLOAD_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 

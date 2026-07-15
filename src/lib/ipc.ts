@@ -57,6 +57,14 @@ export interface ModelInfo {
   display_name: string;
 }
 
+/** Mirror of the shell's WhisperModelInfo (speech-to-text model picker). */
+export interface WhisperModelInfo {
+  id: string;
+  label: string;
+  note: string;
+  approx_mb: number;
+}
+
 export interface ProviderKeyStatus {
   id: ProviderId;
   has_key: boolean;

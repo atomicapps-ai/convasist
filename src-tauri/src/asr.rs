@@ -123,7 +123,7 @@ fn decode_loop(
         Ok(s) => s,
         Err(_) => return,
     };
-    let mut segmenter = UtteranceSegmenter::new(SegmenterConfig::default());
+    let mut segmenter = UtteranceSegmenter::new(low_latency_config());
     let mut events: Vec<SegmentEvent> = Vec::new();
     // Stream-position bookkeeping for start_ms/end_ms (16 kHz samples).
     let mut consumed_samples: u64 = 0;
@@ -168,8 +168,12 @@ fn decode_loop(
         }
 
         for (samples, is_final) in work {
+            // Partials decode only the most recent audio so their cost stays
+            // bounded no matter how long the utterance runs; finals decode
+            // the full window for accuracy.
+            let input = decode_window(&samples, is_final);
             let decode_started = Instant::now();
-            let Some(text) = decode(&mut state, &samples, is_final) else {
+            let Some(text) = decode(&mut state, input, is_final) else {
                 continue;
             };
             if text.is_empty() {
@@ -179,7 +183,7 @@ fn decode_loop(
                 continue;
             }
             let end_ms = consumed_samples * 1000 / TARGET_SAMPLE_RATE_HZ as u64;
-            let dur_ms = samples.len() as u64 * 1000 / TARGET_SAMPLE_RATE_HZ as u64;
+            let dur_ms = input.len() as u64 * 1000 / TARGET_SAMPLE_RATE_HZ as u64;
             sink(TranscriptSegment {
                 side,
                 seq,
@@ -194,6 +198,31 @@ fn decode_loop(
                 seq += 1;
             }
         }
+    }
+}
+
+/// Cap a partial's decode window to the most recent audio (~6 s), so partial
+/// decode time stays bounded however long the utterance runs. Finals decode
+/// the full window.
+const PARTIAL_MAX_SAMPLES: usize = 6 * TARGET_SAMPLE_RATE_HZ as usize;
+
+fn decode_window(samples: &[f32], is_final: bool) -> &[f32] {
+    if !is_final && samples.len() > PARTIAL_MAX_SAMPLES {
+        &samples[samples.len() - PARTIAL_MAX_SAMPLES..]
+    } else {
+        samples
+    }
+}
+
+/// Latency-tuned segmentation: partials ~2×/s, a line locks in ~400 ms after
+/// you stop, and long run-ons finalize by 10 s (vs. the accuracy-first
+/// defaults). Speeds up both conversation sides equally.
+fn low_latency_config() -> SegmenterConfig {
+    SegmenterConfig {
+        partial_interval_ms: 500,
+        silence_close_ms: 400,
+        max_utterance_ms: 10_000,
+        ..SegmenterConfig::default()
     }
 }
 
@@ -253,4 +282,30 @@ fn decode(state: &mut whisper_rs::WhisperState, samples: &[f32], is_final: bool)
         return Some(String::new());
     }
     Some(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn partial_window_is_capped_but_finals_are_whole() {
+        let long = vec![0.1f32; PARTIAL_MAX_SAMPLES + 5_000];
+        // Partial: capped to the most recent PARTIAL_MAX_SAMPLES.
+        assert_eq!(decode_window(&long, false).len(), PARTIAL_MAX_SAMPLES);
+        // Final: the entire window is decoded.
+        assert_eq!(decode_window(&long, true).len(), long.len());
+        // Short partial: untouched.
+        let short = vec![0.1f32; 1_000];
+        assert_eq!(decode_window(&short, false).len(), 1_000);
+    }
+
+    #[test]
+    fn low_latency_config_is_snappier_than_default() {
+        let fast = low_latency_config();
+        let base = SegmenterConfig::default();
+        assert!(fast.partial_interval_ms < base.partial_interval_ms);
+        assert!(fast.silence_close_ms < base.silence_close_ms);
+        assert!(fast.max_utterance_ms <= base.max_utterance_ms);
+    }
 }

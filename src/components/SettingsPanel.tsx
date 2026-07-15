@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { AiSettings } from "@/components/AiSettings";
-import { secretsExport, secretsImport, secretsStatus } from "@/lib/commands";
-import type { SecretsStatus, StreamSide } from "@/lib/ipc";
+import {
+  listWhisperModels,
+  secretsExport,
+  secretsImport,
+  secretsStatus,
+} from "@/lib/commands";
+import type { SecretsStatus, StreamSide, WhisperModelInfo } from "@/lib/ipc";
 import { isTauri } from "@/lib/ipc";
 import { useAppStore } from "@/state/app";
 
@@ -35,6 +40,52 @@ function DeviceSelect({
         ))}
       </select>
     </label>
+  );
+}
+
+/** Speech-to-text model picker — the biggest lever on transcription latency.
+ *  Faster/quantized models cut delay; the change applies on the next session
+ *  start (and downloads the model first if it isn't present). */
+function AsrModelSelect() {
+  const config = useAppStore((s) => s.config);
+  const updateConfig = useAppStore((s) => s.updateConfig);
+  const [models, setModels] = useState<WhisperModelInfo[]>([]);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    void listWhisperModels()
+      .then(setModels)
+      .catch(() => setModels([]));
+  }, []);
+
+  if (!config) return null;
+  const current = models.find((m) => m.id === config.whisper_model);
+
+  return (
+    <div className="mt-3 flex items-end gap-3">
+      <label className="flex min-w-0 flex-col gap-1 text-xs text-fg-muted">
+        Speech-to-text model (speed vs. accuracy)
+        <select
+          className="rounded-md border border-border bg-bg px-2 py-1.5 text-xs text-fg"
+          value={config.whisper_model}
+          onChange={(e) => void updateConfig({ whisper_model: e.target.value })}
+        >
+          {/* Show the saved model even if it isn't in the curated list. */}
+          {!current && (
+            <option value={config.whisper_model}>{config.whisper_model}</option>
+          )}
+          {models.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label} (~{m.approx_mb} MB)
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="min-w-0 flex-1 pb-1 text-[11px] text-fg-faint">
+        {current?.note ??
+          "Applies on the next session start; downloads the model if it isn't already saved."}
+      </p>
+    </div>
   );
 }
 
@@ -202,6 +253,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         Device changes apply when the next session starts. Tip: use a headset —
         open speakers leak the other side into your microphone.
       </p>
+      <AsrModelSelect />
       <AiSettings />
       <SecretsSettings />
     </div>

@@ -88,6 +88,12 @@ fn list_audio_devices() -> Vec<AudioDevice> {
     audio::list_devices()
 }
 
+/// The selectable speech-to-text models (Settings picker) — fastest first.
+#[tauri::command]
+fn list_whisper_models() -> Vec<models::WhisperModelInfo> {
+    models::catalog()
+}
+
 // Async commands run off the main thread — model load (~1 s) and session
 // teardown must never freeze the UI.
 #[tauri::command]
@@ -459,6 +465,7 @@ pub fn run() {
             save_config,
             get_provider_registry,
             list_audio_devices,
+            list_whisper_models,
             start_session,
             stop_session,
             start_recording,
