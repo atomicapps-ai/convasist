@@ -14,6 +14,7 @@ mod recorder;
 mod secrets;
 mod session;
 mod tracker;
+mod vad_silero;
 
 use std::fs;
 use std::sync::Mutex;
@@ -452,6 +453,10 @@ pub fn run() {
                         rag.backfill_embeddings();
                     });
             }
+
+            // Fetch the neural-VAD model in the background so it's ready for
+            // the first session (falls back to the energy gate until it lands).
+            let _ = models::ensure_silero(app.handle());
 
             app.manage(AppState {
                 config: Mutex::new(config),

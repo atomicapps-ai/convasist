@@ -175,6 +175,8 @@ export interface AppConfig {
   input_device: string | null;
   loopback_device: string | null;
   tracker_enabled: boolean;
+  vad_neural: boolean;
+  vad_sensitivity: number;
 }
 
 /** Mirror of convasist-core audio::AudioDevice. */

@@ -10,6 +10,7 @@
 //! when it closes, one last decode emits the final segment that replaces
 //! the partials in the UI.
 
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::Arc;
@@ -37,6 +38,14 @@ impl SharedWhisper {
     }
 }
 
+/// How the ASR worker decides speech vs. noise. With a Silero model path the
+/// worker uses the neural gate; otherwise it uses the energy gate.
+#[derive(Clone)]
+pub struct VadSetup {
+    pub silero_model: Option<PathBuf>,
+    pub threshold: f32,
+}
+
 pub struct WhisperEngine {
     tx: Option<Sender<AudioFrame>>,
     worker: Option<JoinHandle<()>>,
@@ -46,10 +55,16 @@ pub struct WhisperEngine {
     /// Set on stop so the worker skips its final decode and exits promptly
     /// instead of blocking the join on a slow whisper pass.
     stop: Arc<AtomicBool>,
+    vad: VadSetup,
 }
 
 impl WhisperEngine {
-    pub fn new(shared: Arc<SharedWhisper>, side: StreamSide, stop: Arc<AtomicBool>) -> Self {
+    pub fn new(
+        shared: Arc<SharedWhisper>,
+        side: StreamSide,
+        stop: Arc<AtomicBool>,
+        vad: VadSetup,
+    ) -> Self {
         Self {
             tx: None,
             worker: None,
@@ -57,6 +72,7 @@ impl WhisperEngine {
             shared,
             side,
             stop,
+            vad,
         }
     }
 
@@ -75,10 +91,11 @@ impl WhisperEngine {
         let shared = self.shared.clone();
         let side = self.side;
         let stop = self.stop.clone();
+        let vad = self.vad.clone();
 
         let worker = std::thread::Builder::new()
             .name(format!("asr-{side:?}"))
-            .spawn(move || decode_loop(shared, side, rx, sink, stop))
+            .spawn(move || decode_loop(shared, side, rx, sink, stop, vad))
             .map_err(|e| CoreError::Asr(format!("spawn asr worker: {e}")))?;
 
         self.tx = Some(tx.clone());
@@ -125,12 +142,13 @@ fn decode_loop(
     rx: mpsc::Receiver<AudioFrame>,
     mut sink: Box<dyn FnMut(TranscriptSegment) + Send>,
     stop: Arc<AtomicBool>,
+    vad: VadSetup,
 ) {
     let mut state = match shared.context.create_state() {
         Ok(s) => s,
         Err(_) => return,
     };
-    let mut segmenter = UtteranceSegmenter::new(low_latency_config());
+    let mut segmenter = build_segmenter(&vad);
     let mut events: Vec<SegmentEvent> = Vec::new();
     // Stream-position bookkeeping for start_ms/end_ms (16 kHz samples).
     let mut consumed_samples: u64 = 0;
@@ -229,6 +247,20 @@ fn decode_window(samples: &[f32], is_final: bool) -> &[f32] {
     } else {
         samples
     }
+}
+
+/// Build the utterance segmenter with the neural gate when a Silero model is
+/// configured and loads; otherwise the built-in energy gate. Best-effort —
+/// a load failure quietly falls back so a session always starts.
+fn build_segmenter(vad: &VadSetup) -> UtteranceSegmenter {
+    let config = low_latency_config();
+    if let Some(path) = &vad.silero_model {
+        match crate::vad_silero::SileroGate::load(path, vad.threshold) {
+            Ok(gate) => return UtteranceSegmenter::with_gate(config, Box::new(gate)),
+            Err(e) => eprintln!("neural VAD unavailable, using energy gate: {e}"),
+        }
+    }
+    UtteranceSegmenter::new(config)
 }
 
 /// Latency-tuned segmentation: partials ~2×/s, a line locks in ~400 ms after

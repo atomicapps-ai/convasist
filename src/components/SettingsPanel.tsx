@@ -89,6 +89,50 @@ function AsrModelSelect() {
   );
 }
 
+/** Neural noise filter (Silero VAD): only transcribe real speech, so fans /
+ *  keyboards / a TV don't trigger wasted work and hallucinated lines. */
+function NoiseFilterControls() {
+  const config = useAppStore((s) => s.config);
+  const updateConfig = useAppStore((s) => s.updateConfig);
+  if (!config) return null;
+
+  return (
+    <div className="mt-3">
+      <label className="flex items-center gap-2 text-xs text-fg-muted">
+        <input
+          type="checkbox"
+          checked={config.vad_neural}
+          onChange={(e) => void updateConfig({ vad_neural: e.target.checked })}
+        />
+        Filter background noise (neural VAD) — only transcribe speech
+      </label>
+      {config.vad_neural && (
+        <div className="mt-1.5 flex items-center gap-2">
+          <span className="text-[11px] text-fg-faint">Noise-filter strength</span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={config.vad_sensitivity}
+            onChange={(e) =>
+              void updateConfig({ vad_sensitivity: Number(e.target.value) })
+            }
+            aria-label="Noise filtering strength"
+            className="h-1 w-40 accent-ai"
+          />
+          <span className="font-mono text-[10px] text-fg-faint">
+            {Math.round(config.vad_sensitivity * 100)}%
+          </span>
+          <span className="text-[11px] text-fg-faint">
+            higher = stricter (rejects more noise, may clip soft speech)
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Portable encrypted secrets: export API keys to a git-committable file and
  *  load them on another machine. The passphrase comes from an env var, so the
  *  file is safe to commit and keys never re-typed per launch. */
@@ -254,6 +298,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         open speakers leak the other side into your microphone.
       </p>
       <AsrModelSelect />
+      <NoiseFilterControls />
       <AiSettings />
       <SecretsSettings />
     </div>

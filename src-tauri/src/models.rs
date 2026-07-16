@@ -90,6 +90,74 @@ pub fn catalog() -> Vec<WhisperModelInfo> {
 }
 
 static DOWNLOAD_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+static SILERO_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+
+/// Silero VAD v5 model (official upstream). ~2.3 MB.
+const SILERO_URL: &str =
+    "https://raw.githubusercontent.com/snakers4/silero-vad/master/src/silero_vad/data/silero_vad.onnx";
+
+pub fn silero_path(app: &AppHandle) -> Result<PathBuf, CoreError> {
+    Ok(models_dir(app)?.join("silero_vad.onnx"))
+}
+
+/// Returns the Silero model path when present; otherwise kicks off (at most
+/// one) background download and returns `None`. Neural VAD stays off until it
+/// lands — the segmenter falls back to the energy gate meanwhile.
+pub fn ensure_silero(app: &AppHandle) -> Option<PathBuf> {
+    let path = silero_path(app).ok()?;
+    if path.exists() {
+        return Some(path);
+    }
+    if SILERO_IN_FLIGHT
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+    {
+        let app = app.clone();
+        let _ = std::thread::Builder::new()
+            .name("silero-download".into())
+            .spawn(move || {
+                let _ = download_silero(&app);
+                SILERO_IN_FLIGHT.store(false, Ordering::SeqCst);
+            });
+    }
+    None
+}
+
+fn download_silero(app: &AppHandle) -> Result<(), CoreError> {
+    let final_path = silero_path(app)?;
+    let part_path = final_path.with_extension("onnx.part");
+
+    let response = ureq::get(SILERO_URL)
+        .call()
+        .map_err(|e| CoreError::Asr(format!("download silero: {e}")))?;
+    let mut reader = response.into_reader();
+    let mut file = fs::File::create(&part_path).map_err(|e| CoreError::Asr(e.to_string()))?;
+    let mut buf = vec![0u8; 1 << 16];
+    let mut written: u64 = 0;
+    loop {
+        let n = reader
+            .read(&mut buf)
+            .map_err(|e| CoreError::Asr(format!("silero read: {e}")))?;
+        if n == 0 {
+            break;
+        }
+        file.write_all(&buf[..n])
+            .map_err(|e| CoreError::Asr(e.to_string()))?;
+        written += n as u64;
+    }
+    file.flush().map_err(|e| CoreError::Asr(e.to_string()))?;
+    drop(file);
+
+    // Sanity floor (model is ~2.3 MB): reject a truncated/HTML error body.
+    if written < 500_000 {
+        let _ = fs::remove_file(&part_path);
+        return Err(CoreError::Asr(format!(
+            "silero download too small ({written} bytes)"
+        )));
+    }
+    fs::rename(&part_path, &final_path).map_err(|e| CoreError::Asr(e.to_string()))?;
+    Ok(())
+}
 
 pub fn models_dir(app: &AppHandle) -> Result<PathBuf, CoreError> {
     let dir = app

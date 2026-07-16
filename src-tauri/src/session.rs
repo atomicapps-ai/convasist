@@ -20,7 +20,7 @@ use convasist_core::ipc::{events, AudioLevelEvent, RadarEvent, SessionStateEvent
 use convasist_core::radar::looks_like_question;
 use convasist_core::CoreError;
 
-use crate::asr::{SharedWhisper, WhisperEngine};
+use crate::asr::{SharedWhisper, VadSetup, WhisperEngine};
 use crate::audio::CpalSource;
 use crate::models;
 use crate::rag::RagStore;
@@ -109,13 +109,26 @@ impl SessionManager {
             None
         };
 
+        // Neural VAD (Silero) when enabled and the model is present; the
+        // segmenter falls back to the energy gate otherwise. Sensitivity maps
+        // to a speech-probability cutoff (higher = filter more noise).
+        let vad = VadSetup {
+            silero_model: if config.vad_neural {
+                models::ensure_silero(app)
+            } else {
+                None
+            },
+            threshold: 0.3 + config.vad_sensitivity.clamp(0.0, 1.0) * 0.5,
+        };
+
         let mut engines = Vec::new();
         let mut sources = Vec::new();
         for (side, device) in [
             (StreamSide::Outbound, config.input_device.clone()),
             (StreamSide::Inbound, config.loopback_device.clone()),
         ] {
-            let mut engine = WhisperEngine::new(shared.clone(), side, stop_flag.clone());
+            let mut engine =
+                WhisperEngine::new(shared.clone(), side, stop_flag.clone(), vad.clone());
             engine.set_sink(make_transcript_sink(
                 app.clone(),
                 rag.clone(),

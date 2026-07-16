@@ -31,6 +31,11 @@ pub struct AppConfig {
     /// Commitment & entity tracker (§6.3) — runs fast-slot LLM passes over
     /// finalized speech during a session. Requires a stored API key.
     pub tracker_enabled: bool,
+    /// Neural VAD (Silero): filter background noise so only real speech is
+    /// transcribed. Falls back to the energy gate if the model isn't ready.
+    pub vad_neural: bool,
+    /// Noise-filter strength in [0, 1] (higher = filter more aggressively).
+    pub vad_sensitivity: f32,
 }
 
 impl Default for AppConfig {
@@ -57,6 +62,8 @@ impl Default for AppConfig {
             input_device: None,
             loopback_device: None,
             tracker_enabled: true,
+            vad_neural: true,
+            vad_sensitivity: 0.5,
         }
     }
 }

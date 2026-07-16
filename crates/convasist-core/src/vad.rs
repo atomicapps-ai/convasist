@@ -57,6 +57,35 @@ pub enum SegmentEvent {
     Final(Vec<f32>),
 }
 
+/// Per-frame speech decision. The segmenter delegates "is this frame speech?"
+/// here, so a neural VAD (e.g. Silero, in the shell) can slot in behind the
+/// same interface as the built-in energy gate — the shell provides the model,
+/// core stays dependency-free.
+pub trait SpeechGate {
+    /// True when `frame` (16 kHz mono) is speech.
+    fn is_speech(&mut self, frame: &[f32]) -> bool;
+    /// Clear any internal state (called when an utterance closes).
+    fn reset(&mut self) {}
+}
+
+/// The default gate: a frame is speech when its RMS clears a fixed threshold.
+/// Cheap and deterministic; rejects quiet rooms but not loud steady noise.
+pub struct EnergyGate {
+    threshold_dbfs: f32,
+}
+
+impl EnergyGate {
+    pub fn new(threshold_dbfs: f32) -> Self {
+        Self { threshold_dbfs }
+    }
+}
+
+impl SpeechGate for EnergyGate {
+    fn is_speech(&mut self, frame: &[f32]) -> bool {
+        rms_dbfs(frame) >= self.threshold_dbfs
+    }
+}
+
 #[derive(Clone, Copy)]
 enum Phase {
     Silence,
@@ -78,10 +107,19 @@ pub struct UtteranceSegmenter {
     /// Speech frames observed in the open utterance (min-speech gate).
     speech_frames: u32,
     phase: Phase,
+    /// Per-frame speech decision (energy by default; neural VAD injectable).
+    gate: Box<dyn SpeechGate>,
 }
 
 impl UtteranceSegmenter {
+    /// Segmenter backed by the built-in energy gate.
     pub fn new(config: SegmenterConfig) -> Self {
+        let gate = Box::new(EnergyGate::new(config.speech_threshold_dbfs));
+        Self::with_gate(config, gate)
+    }
+
+    /// Segmenter backed by a caller-supplied speech gate (e.g. Silero).
+    pub fn with_gate(config: SegmenterConfig, gate: Box<dyn SpeechGate>) -> Self {
         let frame_len = (config.sample_rate as usize * config.frame_ms as usize) / 1000;
         Self {
             config,
@@ -91,6 +129,7 @@ impl UtteranceSegmenter {
             utterance: Vec::new(),
             speech_frames: 0,
             phase: Phase::Silence,
+            gate,
         }
     }
 
@@ -134,7 +173,7 @@ impl UtteranceSegmenter {
     }
 
     fn process_frame(&mut self, frame: &[f32], events: &mut Vec<SegmentEvent>) {
-        let is_speech = rms_dbfs(frame) >= self.config.speech_threshold_dbfs;
+        let is_speech = self.gate.is_speech(frame);
         let silence_close = self.ms_to_frames(self.config.silence_close_ms);
         let partial_every = self.ms_to_frames(self.config.partial_interval_ms);
         let min_speech = self.min_speech_frames();
