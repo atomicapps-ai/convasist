@@ -55,3 +55,6 @@ ort = "=2.0.0-rc.9"
 # Call recording (owner request): write the two capture sides as a stereo
 # 16-bit WAV. Pure-Rust, tiny; all encoding happens on a dedicated thread.
 hound = "3"
+# Deepgram cloud streaming STT (opt-in engine): sync WebSocket driven from a
+# dedicated thread per side, per the blocking-I/O-off-the-UI-path rule.
+tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }

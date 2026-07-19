@@ -41,6 +41,15 @@ export function listWhisperModels(): Promise<WhisperModelInfo[]> {
   return invoke<WhisperModelInfo[]>("list_whisper_models");
 }
 
+/** Store (empty string clears) the Deepgram API key in the OS vault. */
+export function setDeepgramKey(key: string): Promise<void> {
+  return invoke("set_deepgram_key", { key });
+}
+
+export function deepgramKeyStatus(): Promise<boolean> {
+  return invoke<boolean>("deepgram_key_status");
+}
+
 export function startSession(): Promise<string> {
   return invoke<string>("start_session");
 }

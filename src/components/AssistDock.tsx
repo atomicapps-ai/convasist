@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { isTauri } from "@/lib/ipc";
+import { useAppStore } from "@/state/app";
 import { useAssistStore, type AssistCard } from "@/state/assist";
 
 function Card({ card }: { card: AssistCard }) {
@@ -107,6 +108,9 @@ export function AssistDock() {
   const cards = useAssistStore((s) => s.cards);
   const busy = useAssistStore((s) => s.busy);
   const request = useAssistStore((s) => s.request);
+  // In the two-column layout, answer cards render in the AI column beside
+  // the conversation; the dock only lists them in sidecar mode.
+  const sidecar = useAppStore((s) => s.sidecar);
   const [question, setQuestion] = useState("");
   const [collapsed, setCollapsed] = useState(false);
 
@@ -174,7 +178,7 @@ export function AssistDock() {
           placeholder="Ask about this conversation…"
           className="min-w-0 flex-1 rounded-md border border-border bg-bg px-2 py-1 text-xs text-fg placeholder:text-fg-faint"
         />
-        {cards.length > 0 && (
+        {sidecar && cards.length > 0 && (
           <button
             type="button"
             onClick={() => setCollapsed((v) => !v)}
@@ -185,7 +189,7 @@ export function AssistDock() {
         )}
       </div>
       <RadarCard />
-      {!collapsed && cards.length > 0 && (
+      {sidecar && !collapsed && cards.length > 0 && (
         <div className="mt-2 flex flex-col gap-2">
           {cards.map((card) => (
             <Card key={card.id} card={card} />

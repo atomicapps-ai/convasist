@@ -20,11 +20,38 @@ use convasist_core::ipc::{events, AudioLevelEvent, RadarEvent, SessionStateEvent
 use convasist_core::radar::looks_like_question;
 use convasist_core::CoreError;
 
+use convasist_core::asr::AsrEngineId;
+
 use crate::asr::{SharedWhisper, VadSetup, WhisperEngine};
+use crate::asr_deepgram::DeepgramEngine;
 use crate::audio::CpalSource;
 use crate::models;
 use crate::rag::RagStore;
 use crate::recorder::Recorder;
+
+/// Either transcription engine behind one session-facing surface.
+enum Engine {
+    Whisper(WhisperEngine),
+    Deepgram(DeepgramEngine),
+}
+
+impl Engine {
+    // Sinks are set on the concrete engines before wrapping, so the enum
+    // only needs the two session-lifecycle calls.
+    fn frame_sender(&mut self) -> Result<Sender<AudioFrame>, CoreError> {
+        match self {
+            Engine::Whisper(e) => e.frame_sender(),
+            Engine::Deepgram(e) => e.frame_sender(),
+        }
+    }
+
+    fn finish(&mut self) -> Result<(), CoreError> {
+        match self {
+            Engine::Whisper(e) => e.finish(),
+            Engine::Deepgram(e) => e.finish(),
+        }
+    }
+}
 
 /// A stream is unhealthy when no frames arrived for this long (A4 watchdog).
 const STALL_AFTER: Duration = Duration::from_millis(1500);
@@ -43,7 +70,7 @@ pub struct SessionManager {
 struct ActiveSession {
     id: String,
     sources: Vec<CpalSource>,
-    engines: Vec<WhisperEngine>,
+    engines: Vec<Engine>,
     stop_flag: Arc<AtomicBool>,
     /// Held so the tracker worker lives with the session; dropping it (on
     /// stop) triggers the tracker's final pass and shutdown.
@@ -84,10 +111,22 @@ impl SessionManager {
             }
         }
 
-        // Fail fast (before touching audio devices) if the model is absent —
-        // ensure_model kicks off the background download (T6).
-        let model_path = models::ensure_model(app, &config.whisper_model)?;
-        let shared = self.load_whisper(&model_path.to_string_lossy())?;
+        // Engine choice: Deepgram cloud streaming when opted in and a key is
+        // stored (conversation-speed interims, ~100–300 ms); local whisper
+        // otherwise. Whisper stays the fallback if the cloud connect fails.
+        let deepgram_key = if config.asr_engine == AsrEngineId::DeepgramCloud {
+            crate::asr_deepgram::load_api_key()
+        } else {
+            None
+        };
+        // Fail fast (before touching audio devices) if the whisper model is
+        // absent — ensure_model kicks off the background download (T6). With
+        // Deepgram active, whisper (and its download) is skipped entirely.
+        let mut whisper_shared: Option<Arc<SharedWhisper>> = None;
+        if deepgram_key.is_none() {
+            let model_path = models::ensure_model(app, &config.whisper_model)?;
+            whisper_shared = Some(self.load_whisper(&model_path.to_string_lossy())?);
+        }
 
         let session_id = format!("session-{}", now_unix_ms());
         let stop_flag = Arc::new(AtomicBool::new(false));
@@ -121,20 +160,57 @@ impl SessionManager {
             threshold: 0.3 + config.vad_sensitivity.clamp(0.0, 1.0) * 0.5,
         };
 
-        let mut engines = Vec::new();
+        let mut engines: Vec<Engine> = Vec::new();
         let mut sources = Vec::new();
         for (side, device) in [
             (StreamSide::Outbound, config.input_device.clone()),
             (StreamSide::Inbound, config.loopback_device.clone()),
         ] {
-            let mut engine =
-                WhisperEngine::new(shared.clone(), side, stop_flag.clone(), vad.clone());
-            engine.set_sink(make_transcript_sink(
-                app.clone(),
-                rag.clone(),
-                session_file.clone(),
-                tracker_tx.clone(),
-            ));
+            let make_sink = || {
+                make_transcript_sink(
+                    app.clone(),
+                    rag.clone(),
+                    session_file.clone(),
+                    tracker_tx.clone(),
+                )
+            };
+
+            let mut engine = match &deepgram_key {
+                Some(key) => {
+                    let mut dg = DeepgramEngine::new(side, key.clone());
+                    dg.set_sink(make_sink());
+                    // The connect happens here; a bad key / no network falls
+                    // back to local whisper so the session still starts.
+                    match dg.frame_sender() {
+                        Ok(_) => Engine::Deepgram(dg),
+                        Err(e) => {
+                            eprintln!("deepgram unavailable ({e}); using local whisper");
+                            let shared = match &whisper_shared {
+                                Some(s) => s.clone(),
+                                None => {
+                                    let model_path =
+                                        models::ensure_model(app, &config.whisper_model)?;
+                                    let s = self.load_whisper(&model_path.to_string_lossy())?;
+                                    whisper_shared = Some(s.clone());
+                                    s
+                                }
+                            };
+                            let mut w =
+                                WhisperEngine::new(shared, side, stop_flag.clone(), vad.clone());
+                            w.set_sink(make_sink());
+                            Engine::Whisper(w)
+                        }
+                    }
+                }
+                None => {
+                    let shared = whisper_shared
+                        .clone()
+                        .expect("whisper loaded when deepgram is off");
+                    let mut w = WhisperEngine::new(shared, side, stop_flag.clone(), vad.clone());
+                    w.set_sink(make_sink());
+                    Engine::Whisper(w)
+                }
+            };
             let frames_tx = engine.frame_sender()?;
 
             let mut source = CpalSource::new(side, device);

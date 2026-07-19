@@ -20,6 +20,11 @@ export interface AssistCard {
   error: string | null;
   sources: AssistSource[];
   startedAtMs: number;
+  /** Transcript bubble this answer researches (`"<side>-<seq>"`), if any —
+   *  drives the connector line from the AI column back to the bubble. */
+  sourceKey: string | null;
+  /** Short quote of the researched bubble, shown on the card. */
+  sourceQuote: string | null;
 }
 
 interface AssistState {
@@ -30,7 +35,11 @@ interface AssistState {
   /** Cumulative session tracker state (§6.3). */
   tracker: TrackerEvent | null;
 
-  request: (kind: AssistKind, question?: string) => Promise<void>;
+  request: (
+    kind: AssistKind,
+    question?: string,
+    source?: { key: string; quote: string },
+  ) => Promise<void>;
   applyChunk: (chunk: AssistChunkEvent) => void;
   applySources: (event: AssistSourcesEvent) => void;
   applyRadar: (event: RadarEvent) => void;
@@ -47,7 +56,7 @@ export const useAssistStore = create<AssistState>((set, get) => ({
   radar: null,
   tracker: null,
 
-  request: async (kind, question) => {
+  request: async (kind, question, source) => {
     if (get().busy) return;
     counter += 1;
     const id = `assist-${Date.now()}-${counter}`;
@@ -64,8 +73,10 @@ export const useAssistStore = create<AssistState>((set, get) => ({
           error: null,
           sources: [],
           startedAtMs: Date.now(),
+          sourceKey: source?.key ?? null,
+          sourceQuote: source?.quote ?? null,
         },
-        ...s.cards.slice(0, 4),
+        ...s.cards.slice(0, 5),
       ],
     }));
     try {

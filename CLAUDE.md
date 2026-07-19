@@ -18,10 +18,11 @@ Windows is the Phase 1 target (loopback is WASAPI-only).
 ## Stack
 
 Tauri 2 shell (Rust core + system WebView) · React 19 + TypeScript + Tailwind 4 +
-Zustand UI · cpal/WASAPI capture → whisper.cpp ASR (whisper-rs) → hybrid RAG
-(BM25 + fastembed/ONNX embeddings, RRF fusion) → provider-agnostic LLM streaming
-(Anthropic default; OpenAI/Google/xAI/DeepSeek/Ollama). **Do not swap a layer
-without asking the owner.**
+Zustand UI · cpal/WASAPI capture → whisper.cpp ASR (whisper-rs; opt-in Deepgram
+cloud streaming via `asr_engine=deepgram_cloud` + key, `src-tauri/src/asr_deepgram.rs`)
+→ hybrid RAG (BM25 + fastembed/ONNX embeddings, RRF fusion) → provider-agnostic
+LLM streaming (Anthropic default; OpenAI/Google/xAI/DeepSeek/Ollama). **Do not
+swap a layer without asking the owner.**
 
 ## Repo layout
 

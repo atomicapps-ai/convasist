@@ -5,6 +5,7 @@
 //! registry (Claude default), with API keys in the OS credential vault.
 
 mod asr;
+mod asr_deepgram;
 mod audio;
 mod embed;
 mod llm;
@@ -93,6 +94,18 @@ fn list_audio_devices() -> Vec<AudioDevice> {
 #[tauri::command]
 fn list_whisper_models() -> Vec<models::WhisperModelInfo> {
     models::catalog()
+}
+
+/// Store (or clear, with an empty string) the Deepgram API key in the OS
+/// vault. Enables the cloud streaming engine (Settings → engine).
+#[tauri::command]
+fn set_deepgram_key(key: String) -> Result<(), String> {
+    asr_deepgram::store_api_key(&key).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn deepgram_key_status() -> bool {
+    asr_deepgram::load_api_key().is_some()
 }
 
 // Async commands run off the main thread — model load (~1 s) and session
@@ -471,6 +484,8 @@ pub fn run() {
             get_provider_registry,
             list_audio_devices,
             list_whisper_models,
+            set_deepgram_key,
+            deepgram_key_status,
             start_session,
             stop_session,
             start_recording,
