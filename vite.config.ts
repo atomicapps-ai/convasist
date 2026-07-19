@@ -16,6 +16,11 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
+    watch: {
+      // Never watch the Rust side: cargo holds locks on build artifacts
+      // (EBUSY on Windows) and its output churn is irrelevant to the UI.
+      ignored: ["**/src-tauri/**", "**/target/**"],
+    },
   },
   build: {
     target: "es2022",
