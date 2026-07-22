@@ -714,6 +714,7 @@ dependencies = [
  "fastembed",
  "hound",
  "keyring",
+ "log",
  "ort",
  "pdf-extract",
  "rtrb",
@@ -6208,6 +6209,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4d2eac0a371f8ae667a5ee15ae4130553ea3004e7572544d1ce546c81ea8874b"
 dependencies = [
  "libc",
+ "log",
  "whisper-rs-sys",
 ]
 
