@@ -3,6 +3,8 @@ import { useCallback, useEffect, useState } from "react";
 import { AiSettings } from "@/components/AiSettings";
 import {
   deepgramKeyStatus,
+  exportConfig,
+  importConfig,
   listWhisperModels,
   secretsExport,
   secretsImport,
@@ -223,6 +225,81 @@ function NoiseFilterControls() {
   );
 }
 
+/** Config file sync: settings live in `convasist.config.json`, committed to
+ *  the repo — a fresh machine seeds from it automatically; these buttons
+ *  push/pull your current settings to/from that file. Keys are NOT in this
+ *  file (they use the encrypted secrets flow below). */
+function ConfigFileControls() {
+  const updateConfig = useAppStore((s) => s.updateConfig);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const doExport = async () => {
+    try {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const dest = await save({
+        defaultPath: "convasist.config.json",
+        filters: [{ name: "Config", extensions: ["json"] }],
+      });
+      if (!dest) return;
+      await exportConfig(dest);
+      setNotice("Saved. Commit it to the repo so other machines pick it up.");
+    } catch (e) {
+      setNotice(String(e));
+    }
+  };
+
+  const doImport = async () => {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const src = await open({
+        multiple: false,
+        filters: [{ name: "Config", extensions: ["json"] }],
+      });
+      if (!src || Array.isArray(src)) return;
+      const config = await importConfig(src);
+      // Push the imported values through the store so the UI reflects them.
+      await updateConfig(config);
+      setNotice("Config applied.");
+    } catch (e) {
+      setNotice(String(e));
+    }
+  };
+
+  return (
+    <div className="mt-4 border-t border-border pt-3">
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-muted">
+        Settings file
+      </h3>
+      <p className="mt-1 text-[11px] text-fg-faint">
+        Defaults live in <code className="font-mono">convasist.config.json</code>{" "}
+        in the repo — a fresh machine starts from it. Export your tuned
+        settings there and commit; API keys are never in this file.
+      </p>
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => void doExport()}
+          className="rounded-md border border-border px-2.5 py-1 text-xs text-fg-muted hover:text-fg"
+        >
+          Export settings…
+        </button>
+        <button
+          type="button"
+          onClick={() => void doImport()}
+          className="rounded-md border border-border px-2.5 py-1 text-xs text-fg-muted hover:text-fg"
+        >
+          Import…
+        </button>
+        {notice && (
+          <span className="text-[11px] text-fg-faint" role="status">
+            {notice}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** Portable encrypted secrets: export API keys to a git-committable file and
  *  load them on another machine. The passphrase comes from an env var, so the
  *  file is safe to commit and keys never re-typed per launch. */
@@ -391,6 +468,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
       <AsrModelSelect />
       <NoiseFilterControls />
       <AiSettings />
+      <ConfigFileControls />
       <SecretsSettings />
     </div>
   );

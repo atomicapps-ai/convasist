@@ -73,7 +73,10 @@ npm install
 npm run tauri dev      # first launch downloads the whisper + embedding models
 ```
 
-LLM API keys are entered in-app (Settings), not a config file. To carry keys to
+Default settings live in the repo-committed `convasist.config.json` — a fresh
+machine seeds its config from it (Settings → "Export settings…" writes the
+current values back for committing). LLM API keys are NEVER in that file —
+they are entered in-app (Settings). To carry keys to
 another machine, set `CONVASIST_SECRETS_PASSPHRASE` (any strong passphrase),
 Settings → **Export encrypted…**, commit the resulting `convasist.secrets.enc`,
 then on the other machine set the same env var and the keys load on startup.

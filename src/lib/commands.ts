@@ -29,6 +29,16 @@ export function saveConfig(config: AppConfig): Promise<void> {
   return invoke("save_config", { config });
 }
 
+/** Write the current config to a JSON file (for committing to the repo). */
+export function exportConfig(path: string): Promise<void> {
+  return invoke("export_config", { path });
+}
+
+/** Load a config file, apply it live, and persist it. */
+export function importConfig(path: string): Promise<AppConfig> {
+  return invoke<AppConfig>("import_config", { path });
+}
+
 export function getProviderRegistry(): Promise<ProviderInfo[]> {
   return invoke<ProviderInfo[]>("get_provider_registry");
 }

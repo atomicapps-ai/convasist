@@ -1,0 +1,18 @@
+{
+  "asr_engine": "whisper_local",
+  "whisper_model": "tiny.en-q5_1",
+  "llm_quality": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-5"
+  },
+  "llm_fast": {
+    "provider": "anthropic",
+    "model": "claude-haiku-4-5"
+  },
+  "consent_acknowledged": false,
+  "input_device": null,
+  "loopback_device": null,
+  "tracker_enabled": true,
+  "vad_neural": true,
+  "vad_sensitivity": 0.5
+}

@@ -51,12 +51,64 @@ fn config_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     Ok(dir.join("config.json"))
 }
 
+/// Candidate locations for the repo-committed defaults file. `tauri dev`
+/// runs the app with cwd = `src-tauri/`, so the repo root is one level up.
+fn repo_config_candidates() -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    if let Ok(p) = std::env::var("CONVASIST_CONFIG_FILE") {
+        if !p.trim().is_empty() {
+            out.push(std::path::PathBuf::from(p));
+        }
+    }
+    out.push(std::path::PathBuf::from("convasist.config.json"));
+    out.push(std::path::PathBuf::from("../convasist.config.json"));
+    out
+}
+
 fn load_config(app: &AppHandle) -> AppConfig {
-    config_path(app)
+    if let Some(existing) = config_path(app)
         .ok()
         .and_then(|p| fs::read_to_string(p).ok())
         .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+    {
+        return existing;
+    }
+    // Fresh machine: seed from the repo-committed defaults so tuned settings
+    // travel via git (owner request). Falls back to compiled defaults.
+    for candidate in repo_config_candidates() {
+        if let Some(config) = fs::read_to_string(&candidate)
+            .ok()
+            .and_then(|s| serde_json::from_str::<AppConfig>(&s).ok())
+        {
+            eprintln!("[convasist] seeded config from {}", candidate.display());
+            let _ = persist_config(app, &config);
+            return config;
+        }
+    }
+    AppConfig::default()
+}
+
+/// Write the current config as pretty JSON to `path` — meant for committing
+/// `convasist.config.json` to the repo as the cross-machine defaults.
+#[tauri::command]
+fn export_config(state: State<AppState>, path: String) -> Result<(), String> {
+    let config = state.config.lock().expect("config lock").clone();
+    let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    fs::write(&path, json).map_err(|e| e.to_string())
+}
+
+/// Load a config file, apply it as the live config, and persist it.
+#[tauri::command]
+fn import_config(
+    app: AppHandle,
+    state: State<AppState>,
+    path: String,
+) -> Result<AppConfig, String> {
+    let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let config: AppConfig = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    persist_config(&app, &config)?;
+    *state.config.lock().expect("config lock") = config.clone();
+    Ok(config)
 }
 
 fn persist_config(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
@@ -481,6 +533,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_config,
             save_config,
+            export_config,
+            import_config,
             get_provider_registry,
             list_audio_devices,
             list_whisper_models,

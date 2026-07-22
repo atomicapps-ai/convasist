@@ -216,13 +216,44 @@ fn stream_loop(
             Ok(Message::Ping(payload)) => {
                 let _ = socket.send(Message::Pong(payload));
             }
-            Ok(Message::Close(_)) | Err(tungstenite::Error::ConnectionClosed) => break 'session,
+            Ok(Message::Close(frame)) => {
+                eprintln!("[deepgram {side:?}] server closed the stream: {frame:?}");
+                break 'session;
+            }
+            Err(tungstenite::Error::ConnectionClosed) => {
+                eprintln!("[deepgram {side:?}] connection closed");
+                break 'session;
+            }
             Ok(_) => {}
-            // Read timeout (WouldBlock) lands here: just loop.
-            Err(_) => {}
+            // The read timeout fires constantly by design — silently loop.
+            Err(tungstenite::Error::Io(e))
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) => {}
+            // Anything else is a real transport failure: say so and try one
+            // reconnect instead of spinning silently with no captions.
+            Err(e) => {
+                eprintln!("[deepgram {side:?}] read error: {e}");
+                if reconnected {
+                    break 'session;
+                }
+                reconnected = true;
+                match connect(&api_key) {
+                    Ok(s) => {
+                        eprintln!("[deepgram {side:?}] reconnected");
+                        socket = s;
+                    }
+                    Err(e2) => {
+                        eprintln!("[deepgram {side:?}] reconnect failed: {e2}");
+                        break 'session;
+                    }
+                }
+            }
         }
     }
     let _ = socket.close(None);
+    eprintln!("[deepgram {side:?}] stream worker exited");
 }
 
 /// Parse one Deepgram results message and emit it as a transcript segment.
@@ -248,7 +279,17 @@ fn emit_results(
 
 fn parse_result(side: StreamSide, text: &str, seq: u64) -> Option<TranscriptSegment> {
     let value: serde_json::Value = serde_json::from_str(text).ok()?;
-    if value.get("type").and_then(|t| t.as_str()) != Some("Results") {
+    let msg_type = value.get("type").and_then(|t| t.as_str());
+    if msg_type != Some("Results") {
+        // Metadata arrives once at connect (a useful "we're live" signal);
+        // anything else — especially server-side errors — must be visible.
+        match msg_type {
+            Some("Metadata") => eprintln!("[deepgram {side:?}] connected, streaming"),
+            _ => eprintln!(
+                "[deepgram {side:?}] server message: {}",
+                &text[..text.len().min(200)]
+            ),
+        }
         return None;
     }
     let alternative = value

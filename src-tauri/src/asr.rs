@@ -209,13 +209,25 @@ fn decode_loop(
             let input = decode_window(&samples, is_final);
             let decode_started = Instant::now();
             let Some(text) = decode(&mut state, input, is_final) else {
+                eprintln!("[asr {side:?}] decode failed");
                 continue;
             };
             if text.is_empty() {
                 if is_final {
+                    eprintln!(
+                        "[asr {side:?}] final decoded empty ({} ms audio) — filtered as silence/hallucination",
+                        input.len() as u64 * 1000 / TARGET_SAMPLE_RATE_HZ as u64
+                    );
                     seq += 1;
                 }
                 continue;
+            }
+            if is_final {
+                eprintln!(
+                    "[asr {side:?}] final: {} chars in {} ms decode",
+                    text.len(),
+                    decode_started.elapsed().as_millis()
+                );
             }
             let end_ms = consumed_samples * 1000 / TARGET_SAMPLE_RATE_HZ as u64;
             let dur_ms = input.len() as u64 * 1000 / TARGET_SAMPLE_RATE_HZ as u64;
@@ -256,8 +268,14 @@ fn build_segmenter(vad: &VadSetup) -> UtteranceSegmenter {
     let config = low_latency_config();
     if let Some(path) = &vad.silero_model {
         match crate::vad_silero::SileroGate::load(path, vad.threshold) {
-            Ok(gate) => return UtteranceSegmenter::with_gate(config, Box::new(gate)),
-            Err(e) => eprintln!("neural VAD unavailable, using energy gate: {e}"),
+            Ok(gate) => {
+                eprintln!(
+                    "[asr] neural VAD active (threshold {:.2}) — uncheck it in Settings if speech is being filtered out",
+                    vad.threshold
+                );
+                return UtteranceSegmenter::with_gate(config, Box::new(gate));
+            }
+            Err(e) => eprintln!("[asr] neural VAD unavailable, using energy gate: {e}"),
         }
     }
     UtteranceSegmenter::new(config)

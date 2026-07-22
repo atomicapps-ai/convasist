@@ -157,7 +157,7 @@ impl SessionManager {
             } else {
                 None
             },
-            threshold: 0.3 + config.vad_sensitivity.clamp(0.0, 1.0) * 0.5,
+            threshold: 0.2 + config.vad_sensitivity.clamp(0.0, 1.0) * 0.5,
         };
 
         let mut engines: Vec<Engine> = Vec::new();
@@ -211,6 +211,22 @@ impl SessionManager {
                     Engine::Whisper(w)
                 }
             };
+            // One line per side in the dev console so "why is there no
+            // text" is answerable at a glance: engine + speech gate in use.
+            match &engine {
+                Engine::Whisper(_) => eprintln!(
+                    "[convasist] {side:?}: local whisper '{}', gate={}",
+                    config.whisper_model,
+                    if vad.silero_model.is_some() {
+                        format!("silero (threshold {:.2})", vad.threshold)
+                    } else {
+                        "energy".to_string()
+                    }
+                ),
+                Engine::Deepgram(_) => {
+                    eprintln!("[convasist] {side:?}: deepgram cloud streaming")
+                }
+            }
             let frames_tx = engine.frame_sender()?;
 
             let mut source = CpalSource::new(side, device);
