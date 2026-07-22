@@ -1,0 +1,23 @@
+# Node
+node_modules/
+dist/
+
+# Rust
+target/
+
+# Models are fetched on first run, never committed
+models/
+
+# Env / secrets — plaintext env files never get committed…
+.env
+.env.*
+# …but the passphrase-encrypted secrets file is meant to be committed.
+!*.secrets.enc
+
+# Editor/OS noise
+.DS_Store
+Thumbs.db
+*.log
+
+# Tauri generated artifacts
+src-tauri/gen/

@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+/*
+ * Operator theme (design §5.3 direction a) — dark-first.
+ * All colors live here as variables; components use the semantic aliases
+ * below, never raw hex. Light mode ships later as a derived token block.
+ */
+:root {
+  /* Base surfaces */
+  --color-bg: #0b1220;
+  --color-panel: #111a2b;
+  --color-panel-raised: #16213505;
+  --color-border: #1e293b;
+
+  /* Text */
+  --color-fg: #e2e8f0;
+  --color-fg-muted: #94a3b8;
+  --color-fg-faint: #64748b;
+
+  /* Per-stream accents — these do the spatial work (§5.1 principle 2) */
+  --color-inbound: #22d3ee; /* cyan — THEM (system audio) */
+  --color-outbound: #a78bfa; /* violet — YOU (microphone) */
+  --color-ai: #f59e0b; /* amber — AI assist */
+
+  /* State */
+  --color-rec: #ef4444;
+  --color-ok: #34d399;
+}
+
+@theme inline {
+  --color-bg: var(--color-bg);
+  --color-panel: var(--color-panel);
+  --color-border: var(--color-border);
+  --color-fg: var(--color-fg);
+  --color-fg-muted: var(--color-fg-muted);
+  --color-fg-faint: var(--color-fg-faint);
+  --color-inbound: var(--color-inbound);
+  --color-outbound: var(--color-outbound);
+  --color-ai: var(--color-ai);
+  --color-rec: var(--color-rec);
+  --color-ok: var(--color-ok);
+
+  --font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Mono", ui-monospace, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  overflow: hidden;
+}
+
+/* Partial transcript segments render at reduced opacity and "settle" when
+   finalized (§5.1 principle 3). Reduced-motion users get no transition. */
+.segment-partial {
+  opacity: 0.55;
+}
+.segment-final {
+  opacity: 1;
+  transition: opacity 200ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .segment-final {
+    transition: none;
+  }
+}

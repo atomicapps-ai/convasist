@@ -1,0 +1,201 @@
+import { useEffect, useState } from "react";
+
+import { isTauri } from "@/lib/ipc";
+import { useAppStore } from "@/state/app";
+import { useAssistStore, type AssistCard } from "@/state/assist";
+
+function Card({ card }: { card: AssistCard }) {
+  const label =
+    card.kind === "suggest_reply"
+      ? "Suggested reply"
+      : card.kind === "summarize"
+        ? "Summary"
+        : (card.question ?? "Question");
+
+  return (
+    <div className="rounded-md border border-ai/25 bg-ai/5 px-3 py-2">
+      <div className="mb-1 flex items-center gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-ai">
+          {label}
+        </span>
+        {!card.done && (
+          <span className="text-[11px] text-fg-faint" role="status">
+            thinking…
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={() => void navigator.clipboard.writeText(card.text)}
+          className="ml-auto text-[11px] text-fg-faint hover:text-fg"
+        >
+          Copy
+        </button>
+      </div>
+      {card.error ? (
+        <p className="text-xs text-rec">{card.error}</p>
+      ) : (
+        <p className="whitespace-pre-wrap text-sm leading-relaxed">
+          {card.text || "…"}
+        </p>
+      )}
+      {card.sources.length > 0 && (
+        <p className="mt-1.5 text-[11px] text-fg-faint">
+          sources:{" "}
+          {[
+            ...new Set(
+              card.sources.map((s) => `${s.file_name} · ${s.location}`),
+            ),
+          ]
+            .slice(0, 4)
+            .join("  ·  ")}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * AI assist dock (design §5.2, U4/O2): action buttons + streaming answer
+ * cards. `Ctrl+Space` fires "suggest reply" from anywhere in the app.
+ */
+/** Instant reference hit for an inbound question (§6.2) — zero LLM cost. */
+function RadarCard() {
+  const radar = useAssistStore((s) => s.radar);
+  const dismiss = useAssistStore((s) => s.dismissRadar);
+  const request = useAssistStore((s) => s.request);
+  if (!radar) return null;
+
+  return (
+    <div className="mt-2 rounded-md border border-inbound/30 bg-inbound/5 px-3 py-2">
+      <div className="flex items-center gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-inbound">
+          They asked
+        </span>
+        <span className="truncate text-xs text-fg-muted">
+          “{radar.question}”
+        </span>
+        <button
+          type="button"
+          onClick={() => void request("question", radar.question)}
+          className="ml-auto rounded-md border border-ai/40 px-2 py-0.5 text-[11px] text-ai hover:bg-ai/10"
+        >
+          ✦ Elaborate
+        </button>
+        <button
+          type="button"
+          onClick={dismiss}
+          aria-label="Dismiss"
+          className="text-[11px] text-fg-faint hover:text-fg"
+        >
+          ✕
+        </button>
+      </div>
+      <div className="mt-1.5 flex flex-col gap-1">
+        {radar.sources.slice(0, 2).map((s, i) => (
+          <p key={i} className="text-xs leading-relaxed text-fg">
+            <span className="font-mono text-[10px] text-fg-faint">
+              {s.file_name} · {s.location} —{" "}
+            </span>
+            {s.text.length > 280 ? `${s.text.slice(0, 280)}…` : s.text}
+          </p>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function AssistDock() {
+  const cards = useAssistStore((s) => s.cards);
+  const busy = useAssistStore((s) => s.busy);
+  const request = useAssistStore((s) => s.request);
+  // In the two-column layout, answer cards render in the AI column beside
+  // the conversation; the dock only lists them in sidecar mode.
+  const sidecar = useAppStore((s) => s.sidecar);
+  const [question, setQuestion] = useState("");
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.code === "Space") {
+        e.preventDefault();
+        void request("suggest_reply");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [request]);
+
+  if (!isTauri()) {
+    return (
+      <aside className="shrink-0 border-t border-border bg-panel px-4 py-2">
+        <p className="text-xs text-fg-muted">
+          <span className="mr-2 font-semibold text-ai" aria-hidden>
+            ✦
+          </span>
+          AI assist is available in the desktop app.
+        </p>
+      </aside>
+    );
+  }
+
+  const submitQuestion = () => {
+    const q = question.trim();
+    if (!q) return;
+    setQuestion("");
+    void request("question", q);
+  };
+
+  return (
+    <aside
+      className="max-h-[40%] shrink-0 overflow-y-auto border-t border-border bg-panel px-4 py-2"
+      aria-label="AI assist"
+    >
+      <div className="flex items-center gap-2">
+        <span className="font-semibold text-ai" aria-hidden>
+          ✦
+        </span>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void request("suggest_reply")}
+          className="rounded-md border border-ai/40 px-2.5 py-1 text-xs font-semibold text-ai hover:bg-ai/10 disabled:opacity-50"
+        >
+          Suggest reply
+        </button>
+        <span className="text-[10px] text-fg-faint">Ctrl+Space</span>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void request("summarize")}
+          className="rounded-md border border-border px-2.5 py-1 text-xs text-fg-muted hover:text-fg disabled:opacity-50"
+        >
+          Summarize
+        </button>
+        <input
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && submitQuestion()}
+          placeholder="Ask about this conversation…"
+          className="min-w-0 flex-1 rounded-md border border-border bg-bg px-2 py-1 text-xs text-fg placeholder:text-fg-faint"
+        />
+        {sidecar && cards.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setCollapsed((v) => !v)}
+            className="text-[11px] text-fg-faint hover:text-fg"
+          >
+            {collapsed ? "Expand" : "Collapse"}
+          </button>
+        )}
+      </div>
+      <RadarCard />
+      {sidecar && !collapsed && cards.length > 0 && (
+        <div className="mt-2 flex flex-col gap-2">
+          {cards.map((card) => (
+            <Card key={card.id} card={card} />
+          ))}
+        </div>
+      )}
+    </aside>
+  );
+}

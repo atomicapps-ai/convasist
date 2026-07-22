@@ -1,0 +1,70 @@
+[package]
+name = "convasist-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "convasist — real-time AI conversation assistant (Tauri shell)"
+
+# Windows is the Phase 1 target (design §9 row 4). This crate needs a desktop
+# GUI toolchain; CI builds it on windows-latest. The pure-logic core builds
+# everywhere.
+
+[lib]
+name = "convasist_app"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+convasist-core = { path = "../crates/convasist-core" }
+tauri = { version = "2", features = [] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# Capture: cpal speaks WASAPI on Windows, including loopback (an input
+# stream built on an output device). Design §2.3.
+cpal = "0.16"
+# Lock-free SPSC ring between the device callback and the worker thread
+# (§2.4 rule 1: callbacks only copy into a ring buffer).
+rtrb = "0.3"
+# Local ASR: whisper.cpp bindings (design §2.3). CPU by default; the
+# gpu-vulkan / gpu-cuda features below compile in a GPU backend.
+whisper-rs = "0.14"
+# First-run model downloader (T6) + LLM SSE streaming. Small blocking HTTP
+# client — always driven from dedicated threads, never the UI or audio path.
+ureq = { version = "2", features = ["json"] }
+# API keys live in the OS credential vault (design §4.6) — Windows
+# Credential Manager on the Phase 1 target.
+keyring = { version = "3", features = ["windows-native", "linux-native"] }
+# Portable encrypted-secrets file (owner request): keys/values encrypted with
+# a passphrase (from an env var) so the file is safe to commit to git and
+# travels to another machine. cocoon = PBKDF2 + ChaCha20-Poly1305, salt+nonce
+# handled internally.
+cocoon = "0.4"
+# RAG ingestion (design §4.4 R1): PDF text extraction (pure Rust) and DOCX
+# (a zip of XML — we unzip and strip tags ourselves).
+pdf-extract = "0.7"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+# Native file-picker for the RAG library "Add documents" button.
+tauri-plugin-dialog = "2"
+fastembed = "4"
+# Neural VAD (Silero v5) runs on the same ONNX runtime fastembed already
+# pulls in — pin the exact ort version so there's a single onnxruntime link.
+ort = "=2.0.0-rc.9"
+# Call recording (owner request): write the two capture sides as a stereo
+# 16-bit WAV. Pure-Rust, tiny; all encoding happens on a dedicated thread.
+hound = "3"
+# Deepgram cloud streaming STT (opt-in engine): sync WebSocket driven from a
+# dedicated thread per side, per the blocking-I/O-off-the-UI-path rule.
+tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+
+[features]
+# GPU acceleration for local whisper — opt-in because building them needs the
+# matching toolkit on the build machine (Vulkan SDK / CUDA Toolkit). The
+# binary still falls back to CPU at runtime if no usable GPU is found.
+#   npm run tauri dev -- --features gpu-vulkan
+# Vulkan works on NVIDIA, AMD, and Intel GPUs; prefer it unless you
+# specifically want CUDA on NVIDIA.
+gpu-vulkan = ["whisper-rs/vulkan"]
+gpu-cuda = ["whisper-rs/cuda"]
