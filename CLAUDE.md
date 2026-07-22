@@ -85,9 +85,6 @@ they are entered in-app (Settings). To carry keys to
 another machine, set `CONVASIST_SECRETS_PASSPHRASE` (any strong passphrase),
 Settings → **Export encrypted…**, commit the resulting `convasist.secrets.enc`,
 then on the other machine set the same env var and the keys load on startup.
-Currently the app lives only on branch `claude/convasist-architecture-design-aoh6o5`
-(PR #1) — on a fresh clone, `git checkout` that branch before building until it
-merges.
 
 ## Checks (run before pushing)
 
