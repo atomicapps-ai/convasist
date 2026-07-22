@@ -73,6 +73,11 @@ npm install
 npm run tauri dev      # first launch downloads the whisper + embedding models
 ```
 
+Local whisper runs on CPU by default. For conversation-speed transcription,
+build with the GPU backend (Vulkan SDK prereq + `npm run tauri dev -- --features
+gpu-vulkan`) — see README "GPU-accelerated whisper". The log line
+`[asr] whisper backend: …` tells you which backend a running build uses.
+
 Default settings live in the repo-committed `convasist.config.json` — a fresh
 machine seeds its config from it (Settings → "Export settings…" writes the
 current values back for committing). LLM API keys are NEVER in that file —
@@ -80,9 +85,6 @@ they are entered in-app (Settings). To carry keys to
 another machine, set `CONVASIST_SECRETS_PASSPHRASE` (any strong passphrase),
 Settings → **Export encrypted…**, commit the resulting `convasist.secrets.enc`,
 then on the other machine set the same env var and the keys load on startup.
-Currently the app lives only on branch `claude/convasist-architecture-design-aoh6o5`
-(PR #1) — on a fresh clone, `git checkout` that branch before building until it
-merges.
 
 ## Checks (run before pushing)
 
