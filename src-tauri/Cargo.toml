@@ -28,8 +28,8 @@ cpal = "0.16"
 # Lock-free SPSC ring between the device callback and the worker thread
 # (§2.4 rule 1: callbacks only copy into a ring buffer).
 rtrb = "0.3"
-# Local ASR: whisper.cpp bindings (design §2.3). CPU by default; GPU
-# features (cuda/vulkan/metal) are opt-in flags later.
+# Local ASR: whisper.cpp bindings (design §2.3). CPU by default; the
+# gpu-vulkan / gpu-cuda features below compile in a GPU backend.
 whisper-rs = "0.14"
 # First-run model downloader (T6) + LLM SSE streaming. Small blocking HTTP
 # client — always driven from dedicated threads, never the UI or audio path.
@@ -58,3 +58,13 @@ hound = "3"
 # Deepgram cloud streaming STT (opt-in engine): sync WebSocket driven from a
 # dedicated thread per side, per the blocking-I/O-off-the-UI-path rule.
 tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+
+[features]
+# GPU acceleration for local whisper — opt-in because building them needs the
+# matching toolkit on the build machine (Vulkan SDK / CUDA Toolkit). The
+# binary still falls back to CPU at runtime if no usable GPU is found.
+#   npm run tauri dev -- --features gpu-vulkan
+# Vulkan works on NVIDIA, AMD, and Intel GPUs; prefer it unless you
+# specifically want CUDA on NVIDIA.
+gpu-vulkan = ["whisper-rs/vulkan"]
+gpu-cuda = ["whisper-rs/cuda"]

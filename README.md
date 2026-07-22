@@ -52,6 +52,28 @@ npm run tauri dev
 
 UI-only iteration (no Rust shell, browser tab with empty states): `npm run dev`.
 
+### GPU-accelerated whisper (recommended for conversation speed)
+
+The default build runs whisper on the **CPU** (the log prints
+`[asr] whisper backend: cpu` at model load). For real-time conversation,
+compile in the Vulkan backend — it works on NVIDIA, AMD, and Intel GPUs and
+typically cuts each decode from hundreds of ms to tens of ms:
+
+1. Install the Vulkan SDK (adds the headers + `glslc` the build needs):
+   `winget install --id KhronosGroup.VulkanSDK -e`
+2. Open a **fresh** Developer PowerShell (the SDK sets `VULKAN_SDK` for new
+   terminals), then build with the feature:
+
+```powershell
+npm run tauri dev -- --features gpu-vulkan
+```
+
+The first build recompiles whisper.cpp (a few minutes). On success the log
+prints `[asr] whisper backend: vulkan (GPU)` and, from whisper.cpp itself, the
+GPU device it picked. If no usable GPU exists at runtime it silently falls
+back to CPU — the flag is safe to use everywhere. NVIDIA-only alternative:
+`--features gpu-cuda` (needs the CUDA Toolkit installed, slower to build).
+
 ## Checks
 
 | What | Command |

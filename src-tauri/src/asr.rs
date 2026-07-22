@@ -29,8 +29,22 @@ pub struct SharedWhisper {
     context: WhisperContext,
 }
 
+/// Which whisper.cpp compute backend this binary was compiled with. GPU
+/// backends are opt-in cargo features (`gpu-vulkan` / `gpu-cuda`); the
+/// default build is CPU-only.
+pub const WHISPER_BACKEND: &str = if cfg!(feature = "gpu-vulkan") {
+    "vulkan (GPU)"
+} else if cfg!(feature = "gpu-cuda") {
+    "cuda (GPU)"
+} else {
+    "cpu"
+};
+
 impl SharedWhisper {
     pub fn load(model_path: &str) -> Result<Arc<Self>, CoreError> {
+        // With a GPU feature compiled in, whisper-rs defaults `use_gpu` on and
+        // whisper.cpp falls back to CPU by itself if no usable device exists.
+        eprintln!("[asr] whisper backend: {WHISPER_BACKEND}");
         let context =
             WhisperContext::new_with_params(model_path, WhisperContextParameters::default())
                 .map_err(|e| CoreError::Asr(format!("load model: {e}")))?;
