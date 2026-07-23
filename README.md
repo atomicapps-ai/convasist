@@ -62,17 +62,23 @@ typically cuts each decode from hundreds of ms to tens of ms:
 1. Install the Vulkan SDK (adds the headers + `glslc` the build needs):
    `winget install --id KhronosGroup.VulkanSDK -e`
 2. Open a **fresh** Developer PowerShell (the SDK sets `VULKAN_SDK` for new
-   terminals), then build with the feature:
+   terminals), then build with the dedicated script:
 
 ```powershell
-npm run tauri dev -- --features gpu-vulkan
+npm run tauri:gpu
 ```
 
-The first build recompiles whisper.cpp (a few minutes). On success the log
-prints `[asr] whisper backend: vulkan (GPU)` and, from whisper.cpp itself, the
-GPU device it picked. If no usable GPU exists at runtime it silently falls
-back to CPU — the flag is safe to use everywhere. NVIDIA-only alternative:
-`--features gpu-cuda` (needs the CUDA Toolkit installed, slower to build).
+(Don't try to pass `--features` through `npm run tauri dev --` — npm mangles
+the flag and cargo silently builds the CPU backend; the dev-command line in
+the log will show a stray bare `gpu-vulkan` argument when that happens. The
+`tauri:gpu` script exists so the flag can't get lost. NVIDIA/CUDA variant:
+`npm run tauri:gpu:cuda`.)
+
+The first build recompiles whisper.cpp (a few minutes — a quick 1-2s build
+means the feature did NOT apply). On success the log prints
+`[asr] whisper backend: vulkan (GPU)` and, from whisper.cpp itself, the GPU
+device it picked. If no usable GPU exists at runtime it silently falls back
+to CPU — the flag is safe to use everywhere.
 
 ## Checks
 

@@ -66,11 +66,23 @@ fn repo_config_candidates() -> Vec<std::path::PathBuf> {
 }
 
 fn load_config(app: &AppHandle) -> AppConfig {
-    if let Some(existing) = config_path(app)
+    if let Some(mut existing) = config_path(app)
         .ok()
         .and_then(|p| fs::read_to_string(p).ok())
-        .and_then(|s| serde_json::from_str(&s).ok())
+        .and_then(|s| serde_json::from_str::<AppConfig>(&s).ok())
     {
+        // One-time migration: "base.en" was the pre-quantization seeded
+        // default and decodes several times slower than the current default —
+        // configs still carrying it are stale defaults, not a user choice.
+        // (Explicitly picking base.en-q5_1 or any other model is respected.)
+        if existing.whisper_model == "base.en" {
+            let new_default = AppConfig::default().whisper_model;
+            eprintln!(
+                "[convasist] migrating whisper model 'base.en' (stale default) -> '{new_default}'"
+            );
+            existing.whisper_model = new_default;
+            let _ = persist_config(app, &existing);
+        }
         return existing;
     }
     // Fresh machine: seed from the repo-committed defaults so tuned settings
