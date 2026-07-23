@@ -74,8 +74,9 @@ npm run tauri dev      # first launch downloads the whisper + embedding models
 ```
 
 Local whisper runs on CPU by default. For conversation-speed transcription,
-build with the GPU backend (Vulkan SDK prereq + `npm run tauri dev -- --features
-gpu-vulkan`) — see README "GPU-accelerated whisper". The log line
+build with the GPU backend: Vulkan SDK prereq + `npm run tauri:gpu` (a
+dedicated script — passing `--features` through `npm run tauri dev --` gets
+mangled by npm) — see README "GPU-accelerated whisper". The log line
 `[asr] whisper backend: …` tells you which backend a running build uses.
 
 Default settings live in the repo-committed `convasist.config.json` — a fresh
