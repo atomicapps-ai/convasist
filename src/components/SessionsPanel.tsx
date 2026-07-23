@@ -14,7 +14,9 @@ export function SessionsPanel({ onClose }: { onClose: () => void }) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const loadPastSession = useTranscriptStore((s) => s.loadPastSession);
-  const segments = useTranscriptStore((s) => s.segments);
+  const liveSegments = useTranscriptStore((s) => s.segments);
+  const archived = useTranscriptStore((s) => s.archived);
+  const segments = [...archived, ...liveSegments];
   const viewing = useTranscriptStore((s) => s.viewingPastSessionId);
 
   useEffect(() => {

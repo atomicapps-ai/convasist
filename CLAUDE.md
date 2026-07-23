@@ -15,6 +15,14 @@ right) via `src-tauri/src/recorder.rs` — a background writer thread fed by the
 existing capture frames, so recording adds no work to the audio or UI path.
 Windows is the Phase 1 target (loopback is WASAPI-only).
 
+Conversations are first-class: Stop offers to save the transcript as a named
+**conversation** (`src-tauri/src/conversations.rs`, one JSON per record in
+app-data); while one is open, new listening runs append on screen and
+re-saving stores the fuller transcript. Library documents can be linked to a
+conversation, and the whole reference library can travel between machines via
+the repo-committed `library/` folder ("Sync to repo…" in the Library panel
+exports originals; startup auto-ingests anything new found there).
+
 ## Stack
 
 Tauri 2 shell (Rust core + system WebView) · React 19 + TypeScript + Tailwind 4 +

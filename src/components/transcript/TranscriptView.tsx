@@ -344,7 +344,8 @@ function SidecarFeed({ segments }: { segments: TranscriptSegment[] }) {
  * bubble. Sidecar mode (U9) keeps the single merged feed.
  */
 export function TranscriptView() {
-  const segments = useTranscriptStore((s) => s.segments);
+  const liveSegments = useTranscriptStore((s) => s.segments);
+  const archived = useTranscriptStore((s) => s.archived);
   const sidecar = useAppStore((s) => s.sidecar);
   const cards = useAssistStore((s) => s.cards);
   const busy = useAssistStore((s) => s.busy);
@@ -358,7 +359,12 @@ export function TranscriptView() {
   const [tick, setTick] = useState(0);
   const bump = useCallback(() => setTick((t) => t + 1), []);
 
-  const merged = [...segments].sort((a, b) => a.start_ms - b.start_ms);
+  // Archived material (earlier runs of the open conversation / a loaded
+  // conversation) renders above the live run, which is merged by time.
+  const merged = [
+    ...archived,
+    ...[...liveSegments].sort((a, b) => a.start_ms - b.start_ms),
+  ];
   const convo = useAutoScroll(merged[merged.length - 1]);
   const aiCol = useAutoScroll(null);
 
@@ -377,7 +383,7 @@ export function TranscriptView() {
   }, []);
 
   if (sidecar) {
-    return <SidecarFeed segments={segments} />;
+    return <SidecarFeed segments={merged} />;
   }
 
   const links: Link[] = cards

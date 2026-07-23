@@ -66,6 +66,42 @@ enum Original<'a> {
     PastedText,
 }
 
+/// File extensions the ingestion pipeline understands (mirrors the UI's
+/// SUPPORTED list in RagPanel.tsx).
+const SUPPORTED_EXTS: [&str; 7] = ["pdf", "docx", "md", "markdown", "txt", "html", "htm"];
+
+/// Candidate locations of the repo-committed `library/` folder (git-synced
+/// library, owner request: add a document once and it travels to other
+/// machines via git). `tauri dev` runs with cwd = `src-tauri/`, so the repo
+/// root is one level up — same convention as `convasist.config.json`.
+pub fn repo_library_candidates() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    if let Ok(p) = std::env::var("CONVASIST_LIBRARY_DIR") {
+        if !p.trim().is_empty() {
+            out.push(PathBuf::from(p));
+        }
+    }
+    out.push(PathBuf::from("library"));
+    out.push(PathBuf::from("../library"));
+    out
+}
+
+/// Where to CREATE the repo library folder: next to the repo-committed
+/// config file, so it lands in the git checkout, not some arbitrary cwd.
+fn repo_library_create_dir() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("CONVASIST_LIBRARY_DIR") {
+        if !p.trim().is_empty() {
+            return Some(PathBuf::from(p));
+        }
+    }
+    for parent in [".", ".."] {
+        if Path::new(parent).join("convasist.config.json").exists() {
+            return Some(Path::new(parent).join("library"));
+        }
+    }
+    None
+}
+
 impl RagStore {
     pub fn open(app_data_dir: &Path) -> Result<Self, CoreError> {
         let dir = app_data_dir.join("rag");
@@ -144,6 +180,79 @@ impl RagStore {
             Some(t) => fs::write(dest, t).map_err(|e| CoreError::Rag(e.to_string())),
             None => Err(CoreError::Rag(format!("document '{id}' not found"))),
         }
+    }
+
+    /// Ingest every supported file in the repo-committed `library/` folder
+    /// whose file name isn't already in the store (git-synced library: a
+    /// document added once travels to other machines via git). Best-effort
+    /// per file; returns how many were added.
+    pub fn seed_from_repo_library(&self) -> usize {
+        let Some(dir) = repo_library_candidates().into_iter().find(|p| p.is_dir()) else {
+            return 0;
+        };
+        let existing: std::collections::HashSet<String> =
+            self.list().into_iter().map(|d| d.file_name).collect();
+        let Ok(entries) = fs::read_dir(&dir) else {
+            return 0;
+        };
+        let mut added = 0;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+                continue;
+            };
+            if !SUPPORTED_EXTS.contains(&ext.to_ascii_lowercase().as_str()) {
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if existing.contains(name) {
+                continue;
+            }
+            match self.ingest(&path.to_string_lossy()) {
+                Ok(_) => {
+                    added += 1;
+                    eprintln!("[rag] library sync: ingested {name}");
+                }
+                Err(e) => eprintln!("[rag] library sync: could not ingest {name}: {e}"),
+            }
+        }
+        if added > 0 {
+            eprintln!(
+                "[rag] library sync: {added} new document(s) from {}",
+                dir.display()
+            );
+        }
+        added
+    }
+
+    /// Copy every document's original into the repo `library/` folder so
+    /// committing that folder carries the whole library to other machines.
+    /// Returns the folder and how many documents were written.
+    pub fn sync_to_repo_library(&self) -> Result<(PathBuf, usize), CoreError> {
+        let dir = repo_library_create_dir().ok_or_else(|| {
+            CoreError::Rag(
+                "repo folder not found — run the app from the convasist checkout \
+                 (convasist.config.json must be present)"
+                    .into(),
+            )
+        })?;
+        fs::create_dir_all(&dir).map_err(|e| CoreError::Rag(e.to_string()))?;
+        let mut written = 0;
+        for doc in self.list() {
+            // file_name is a single component from ingestion, but never trust
+            // it as a path.
+            let safe_name = doc.file_name.replace(['/', '\\'], "_");
+            let dest = dir.join(safe_name);
+            if self
+                .export_original(&doc.id, &dest.to_string_lossy())
+                .is_ok()
+            {
+                written += 1;
+            }
+        }
+        Ok((dir, written))
     }
 
     /// Load every persisted document and rebuild the BM25 index over the

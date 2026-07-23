@@ -167,6 +167,20 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ busy: true });
     try {
       await stopSession();
+      // Offer to save the conversation when anything was transcribed
+      // (owner flow: Stop → "save this conversation?").
+      const [{ useTranscriptStore }, { useConversationStore }] =
+        await Promise.all([
+          import("@/state/transcript"),
+          import("@/state/conversation"),
+        ]);
+      const t = useTranscriptStore.getState();
+      const hasContent =
+        t.archived.length > 0 ||
+        t.segments.some((s) => s.is_final && s.text.trim().length > 0);
+      if (hasContent) {
+        useConversationStore.getState().setSavePromptOpen(true);
+      }
     } catch (e) {
       set({ lastError: String(e) });
     } finally {

@@ -80,8 +80,13 @@ export const useAssistStore = create<AssistState>((set, get) => ({
       ],
     }));
     try {
-      const segments = useTranscriptStore.getState().segments;
-      await invokeAssist(id, kind, question ?? null, segments);
+      // Ground the assist in the whole open conversation (earlier runs
+      // included), not just the live run.
+      const t = useTranscriptStore.getState();
+      await invokeAssist(id, kind, question ?? null, [
+        ...t.archived,
+        ...t.segments,
+      ]);
     } catch (e) {
       set((s) => ({
         busy: false,

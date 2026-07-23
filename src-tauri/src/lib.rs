@@ -7,6 +7,7 @@
 mod asr;
 mod asr_deepgram;
 mod audio;
+mod conversations;
 mod embed;
 mod llm;
 mod models;
@@ -28,7 +29,9 @@ use std::sync::Arc;
 use convasist_core::asr::TranscriptSegment;
 use convasist_core::audio::AudioDevice;
 use convasist_core::config::AppConfig;
-use convasist_core::ipc::{events, AssistChunkEvent, AssistSource, AssistSourcesEvent};
+use convasist_core::ipc::{
+    events, AssistChunkEvent, AssistSource, AssistSourcesEvent, SessionStateEvent,
+};
 use convasist_core::llm::{provider_registry, ModelInfo, ProviderId, ProviderInfo};
 use convasist_core::prompt::{build_assist_request, AssistKind};
 use convasist_core::rag::{IngestReport, RagDocument};
@@ -181,10 +184,13 @@ async fn start_session(app: AppHandle, state: State<'_, AppState>) -> Result<Str
         return Err("consent_required".into());
     }
     let rag = state.rag.clone();
-    state
-        .session
-        .start(&app, &config, rag)
-        .map_err(|e| e.to_string())
+    let result = state.session.start(&app, &config, rag);
+    if result.is_err() {
+        // A failed start may have emitted Preparing — make sure the UI's
+        // loading state clears rather than sticking forever.
+        let _ = app.emit(events::SESSION_STATE, SessionStateEvent::Idle);
+    }
+    result.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -412,6 +418,57 @@ async fn secrets_import(src: Option<String>, overwrite: bool) -> Result<String, 
     .map_err(|e| e.to_string())?
 }
 
+// ------------------------------------------------------------ Conversations
+
+/// Create or update a named conversation (Stop → "save this conversation?").
+/// With an existing `id` the record is replaced by the fuller transcript the
+/// UI accumulated — that's how saving again appends.
+#[tauri::command]
+fn conversation_save(
+    app: AppHandle,
+    id: Option<String>,
+    title: Option<String>,
+    segments: Vec<TranscriptSegment>,
+    linked_docs: Vec<String>,
+) -> Result<conversations::Conversation, String> {
+    conversations::save(&app, id, title, segments, linked_docs).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn conversation_list(app: AppHandle) -> Result<Vec<conversations::ConversationSummary>, String> {
+    conversations::list(&app).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn conversation_load(app: AppHandle, id: String) -> Result<conversations::Conversation, String> {
+    conversations::load(&app, &id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn conversation_delete(app: AppHandle, id: String) -> Result<(), String> {
+    conversations::delete(&app, &id).map_err(|e| e.to_string())
+}
+
+/// Copy every library document's original into the repo `library/` folder so
+/// committing it carries the library to other machines (git-synced library).
+#[tauri::command]
+async fn rag_sync_library(state: State<'_, AppState>) -> Result<String, String> {
+    let store = state.rag.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        store
+            .sync_to_repo_library()
+            .map(|(dir, n)| {
+                format!(
+                    "Wrote {n} document(s) to {} — commit that folder to git.",
+                    dir.display()
+                )
+            })
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Build the retrieval query for an assist: the explicit question, or the
 /// text of the last few finalized turns (what's being discussed right now).
 fn retrieval_query(question: Option<&str>, segments: &[TranscriptSegment]) -> String {
@@ -562,6 +619,10 @@ pub fn run() {
                     .name("embed-warm".into())
                     .spawn(move || {
                         embed::warm(cache_dir);
+                        // Git-synced library: pick up documents committed to
+                        // the repo's library/ folder by other machines, then
+                        // embed everything that still lacks vectors.
+                        rag.seed_from_repo_library();
                         rag.backfill_embeddings();
                     });
             }
@@ -609,6 +670,11 @@ pub fn run() {
             session_list,
             session_load,
             export_transcript,
+            conversation_save,
+            conversation_list,
+            conversation_load,
+            conversation_delete,
+            rag_sync_library,
         ])
         .run(tauri::generate_context!())
         .expect("error while running convasist");
