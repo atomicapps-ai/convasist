@@ -66,11 +66,23 @@ fn repo_config_candidates() -> Vec<std::path::PathBuf> {
 }
 
 fn load_config(app: &AppHandle) -> AppConfig {
-    if let Some(existing) = config_path(app)
+    if let Some(mut existing) = config_path(app)
         .ok()
         .and_then(|p| fs::read_to_string(p).ok())
-        .and_then(|s| serde_json::from_str(&s).ok())
+        .and_then(|s| serde_json::from_str::<AppConfig>(&s).ok())
     {
+        // One-time migration: "base.en" was the pre-quantization seeded
+        // default and decodes several times slower than the current default —
+        // configs still carrying it are stale defaults, not a user choice.
+        // (Explicitly picking base.en-q5_1 or any other model is respected.)
+        if existing.whisper_model == "base.en" {
+            let new_default = AppConfig::default().whisper_model;
+            eprintln!(
+                "[convasist] migrating whisper model 'base.en' (stale default) -> '{new_default}'"
+            );
+            existing.whisper_model = new_default;
+            let _ = persist_config(app, &existing);
+        }
         return existing;
     }
     // Fresh machine: seed from the repo-committed defaults so tuned settings
@@ -489,7 +501,42 @@ fn assist(
     Ok(())
 }
 
+/// Filter for whisper.cpp/ggml native logs (routed through the `log` crate by
+/// `whisper_rs::install_logging_hooks`). Dev builds of whisper.cpp are
+/// compiled with -DWHISPER_DEBUG and emit hundreds of per-token debug lines
+/// per utterance — slow enough on the Windows console to tax every decode.
+/// Keep info+ from whisper/ggml (model load, GPU device pick), warn+ from
+/// anything else, and drop debug/trace entirely.
+struct AsrLogFilter;
+
+impl log::Log for AsrLogFilter {
+    fn enabled(&self, meta: &log::Metadata) -> bool {
+        if meta.target().starts_with("whisper_rs") {
+            meta.level() <= log::Level::Info
+        } else {
+            meta.level() <= log::Level::Warn
+        }
+    }
+
+    fn log(&self, record: &log::Record) {
+        if self.enabled(record.metadata()) {
+            eprintln!("{}", record.args());
+        }
+    }
+
+    fn flush(&self) {}
+}
+
+static ASR_LOG_FILTER: AsrLogFilter = AsrLogFilter;
+
 pub fn run() {
+    // Install before anything touches whisper/ggml so their C-side stderr
+    // chatter is level-filtered from the first model load.
+    if log::set_logger(&ASR_LOG_FILTER).is_ok() {
+        log::set_max_level(log::LevelFilter::Info);
+    }
+    whisper_rs::install_logging_hooks();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {

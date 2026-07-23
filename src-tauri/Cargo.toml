@@ -29,8 +29,13 @@ cpal = "0.16"
 # (§2.4 rule 1: callbacks only copy into a ring buffer).
 rtrb = "0.3"
 # Local ASR: whisper.cpp bindings (design §2.3). CPU by default; the
-# gpu-vulkan / gpu-cuda features below compile in a GPU backend.
-whisper-rs = "0.14"
+# gpu-vulkan / gpu-cuda features below compile in a GPU backend. log_backend
+# routes whisper.cpp/ggml's native stderr chatter through the `log` crate so
+# our logger can drop the per-token debug spam dev builds of whisper.cpp emit
+# (it's compiled with -DWHISPER_DEBUG) — hundreds of console lines per
+# utterance, slow enough on the Windows console to tax every decode.
+whisper-rs = { version = "0.14", features = ["log_backend"] }
+log = "0.4"
 # First-run model downloader (T6) + LLM SSE streaming. Small blocking HTTP
 # client — always driven from dedicated threads, never the UI or audio path.
 ureq = { version = "2", features = ["json"] }

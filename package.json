@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "tauri:gpu": "tauri dev --features gpu-vulkan",
+    "tauri:gpu:cuda": "tauri dev --features gpu-cuda"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.9.0",
