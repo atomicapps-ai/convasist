@@ -111,6 +111,17 @@ impl SessionManager {
             }
         }
 
+        // Session start can take real time (model load; on the first GPU run,
+        // minutes of shader compilation). Tell the UI so it can show a
+        // loading state instead of a dead screen; Listening replaces it.
+        let emit_preparing = |message: String| {
+            let _ = app.emit(
+                events::SESSION_STATE,
+                SessionStateEvent::Preparing { message },
+            );
+        };
+        emit_preparing("Preparing the speech engine…".into());
+
         // Engine choice: Deepgram cloud streaming when opted in and a key is
         // stored (conversation-speed interims, ~100–300 ms); local whisper
         // otherwise. Whisper stays the fallback if the cloud connect fails.
@@ -125,7 +136,22 @@ impl SessionManager {
         let mut whisper_shared: Option<Arc<SharedWhisper>> = None;
         if deepgram_key.is_none() {
             let model_path = models::ensure_model(app, &config.whisper_model)?;
+            let cached = {
+                let cache = self.whisper_cache.lock().expect("whisper cache lock");
+                matches!(cache.as_ref(), Some((p, _)) if *p == model_path.to_string_lossy())
+            };
+            if !cached {
+                emit_preparing(if crate::asr::WHISPER_BACKEND == "cpu" {
+                    format!("Loading speech model {}…", config.whisper_model)
+                } else {
+                    format!(
+                        "Loading speech model {} on the GPU — the first run compiles shaders and can take a few minutes…",
+                        config.whisper_model
+                    )
+                });
+            }
             whisper_shared = Some(self.load_whisper(&model_path.to_string_lossy())?);
+            emit_preparing("Starting audio capture…".into());
         }
 
         let session_id = format!("session-{}", now_unix_ms());

@@ -9,6 +9,8 @@ import type {
   AppConfig,
   AssistKind,
   AudioDevice,
+  Conversation,
+  ConversationSummary,
   IngestReport,
   ModelInfo,
   ProviderId,
@@ -157,6 +159,41 @@ export function secretsImport(
   overwrite = false,
 ): Promise<string> {
   return invoke<string>("secrets_import", { src: src ?? null, overwrite });
+}
+
+/**
+ * Create or update a named conversation. Passing an existing `id` replaces
+ * the stored record with this (fuller) transcript — append semantics.
+ */
+export function conversationSave(
+  id: string | null,
+  title: string | null,
+  segments: TranscriptSegment[],
+  linkedDocs: string[],
+): Promise<Conversation> {
+  return invoke<Conversation>("conversation_save", {
+    id,
+    title,
+    segments,
+    linkedDocs,
+  });
+}
+
+export function conversationList(): Promise<ConversationSummary[]> {
+  return invoke<ConversationSummary[]>("conversation_list");
+}
+
+export function conversationLoad(id: string): Promise<Conversation> {
+  return invoke<Conversation>("conversation_load", { id });
+}
+
+export function conversationDelete(id: string): Promise<void> {
+  return invoke("conversation_delete", { id });
+}
+
+/** Copy library originals into the repo `library/` folder for git commit. */
+export function ragSyncLibrary(): Promise<string> {
+  return invoke<string>("rag_sync_library");
 }
 
 export function sessionList(): Promise<SessionSummary[]> {

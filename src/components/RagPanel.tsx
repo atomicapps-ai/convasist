@@ -7,8 +7,10 @@ import {
   ragIngestText,
   ragList,
   ragSetEnabled,
+  ragSyncLibrary,
 } from "@/lib/commands";
 import type { RagDocument } from "@/lib/ipc";
+import { useConversationStore } from "@/state/conversation";
 
 const SUPPORTED = ["pdf", "docx", "md", "markdown", "txt", "html", "htm"];
 
@@ -34,6 +36,10 @@ export function RagPanel({ onClose }: { onClose: () => void }) {
   const [dragOver, setDragOver] = useState(false);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState("");
+  const conversationOpen = useConversationStore((s) => s.openId !== null);
+  const conversationTitle = useConversationStore((s) => s.title);
+  const linkedDocs = useConversationStore((s) => s.linkedDocs);
+  const toggleLinkedDoc = useConversationStore((s) => s.toggleLinkedDoc);
 
   const refresh = useCallback(async () => {
     try {
@@ -194,6 +200,19 @@ export function RagPanel({ onClose }: { onClose: () => void }) {
         </button>
         <button
           type="button"
+          disabled={busy}
+          onClick={() =>
+            void ragSyncLibrary()
+              .then(setNotice)
+              .catch((e) => setNotice(String(e)))
+          }
+          title="Copy every document into the repo's library/ folder — commit it and the library appears on your other machines"
+          className="rounded-md border border-border px-2.5 py-1 text-xs text-fg-muted hover:text-fg disabled:opacity-50"
+        >
+          Sync to repo…
+        </button>
+        <button
+          type="button"
           onClick={onClose}
           className="ml-auto rounded-md border border-border px-3 py-1 text-xs text-fg-muted hover:text-fg"
         >
@@ -281,6 +300,26 @@ export function RagPanel({ onClose }: { onClose: () => void }) {
               <span className="font-mono text-[10px] text-fg-faint">
                 {doc.chunk_count} chunks
               </span>
+              {conversationOpen && (
+                <button
+                  type="button"
+                  onClick={() => void toggleLinkedDoc(doc.id)}
+                  aria-pressed={linkedDocs.includes(doc.id)}
+                  title={
+                    linkedDocs.includes(doc.id)
+                      ? `Unlink from "${conversationTitle}"`
+                      : `Link to "${conversationTitle}"`
+                  }
+                  className={[
+                    "rounded-full border px-2 py-0.5 text-[10px]",
+                    linkedDocs.includes(doc.id)
+                      ? "border-ai/60 text-ai"
+                      : "border-border text-fg-faint hover:text-fg",
+                  ].join(" ")}
+                >
+                  {linkedDocs.includes(doc.id) ? "Linked" : "Link"}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => void downloadDoc(doc)}

@@ -48,6 +48,12 @@ pub struct AudioLevelEvent {
 #[serde(rename_all = "snake_case", tag = "state")]
 pub enum SessionStateEvent {
     Idle,
+    /// Session start is underway but not yet capturing — model loading, GPU
+    /// shader compilation (minutes on the first GPU run), engine connect.
+    /// The UI shows a loading state with `message` instead of a dead screen.
+    Preparing {
+        message: String,
+    },
     Listening {
         session_id: String,
         started_at_unix_ms: u64,

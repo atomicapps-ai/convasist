@@ -38,6 +38,8 @@ export interface AudioLevelEvent {
 
 export type SessionStateEvent =
   | { state: "idle" }
+  /** Start underway: model loading / first-run GPU shader compile. */
+  | { state: "preparing"; message: string }
   | { state: "listening"; session_id: string; started_at_unix_ms: number }
   | { state: "paused"; session_id: string }
   | { state: "error"; message: string };
@@ -135,6 +137,27 @@ export interface SessionSummary {
   id: string;
   started_at_unix_ms: number;
   segment_count: number;
+  preview: string;
+}
+
+/** Mirror of the shell's conversations::Conversation (named saved record). */
+export interface Conversation {
+  id: string;
+  title: string;
+  created_at_unix_ms: number;
+  updated_at_unix_ms: number;
+  segments: TranscriptSegment[];
+  linked_docs: string[];
+}
+
+/** Mirror of the shell's conversations::ConversationSummary. */
+export interface ConversationSummary {
+  id: string;
+  title: string;
+  created_at_unix_ms: number;
+  updated_at_unix_ms: number;
+  segment_count: number;
+  linked_docs: string[];
   preview: string;
 }
 

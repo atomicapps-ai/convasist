@@ -1,17 +1,21 @@
 import { isTauri } from "@/lib/ipc";
 import { useAppStore } from "@/state/app";
+import { useConversationStore } from "@/state/conversation";
 import { useTranscriptStore } from "@/state/transcript";
 
 export function StatusBar({
   onToggleSettings,
   onToggleLibrary,
   onToggleSessions,
+  onToggleConversations,
 }: {
   onToggleSettings: () => void;
   onToggleLibrary: () => void;
   onToggleSessions: () => void;
+  onToggleConversations: () => void;
 }) {
   const session = useTranscriptStore((s) => s.session);
+  const conversationTitle = useConversationStore((s) => s.title);
   const sidecar = useAppStore((s) => s.sidecar);
   const toggleSidecar = useAppStore((s) => s.toggleSidecar);
   const busy = useAppStore((s) => s.busy);
@@ -23,8 +27,10 @@ export function StatusBar({
   const startRecording = useAppStore((s) => s.startRecording);
   const stopRecording = useAppStore((s) => s.stopRecording);
   const listening = session.state === "listening";
+  const preparing = session.state === "preparing";
 
   const statusText = (() => {
+    if (preparing) return session.message;
     if (modelStatus?.state === "downloading") {
       return `Downloading speech model ${modelStatus.model}… ${modelStatus.percent}%`;
     }
@@ -65,6 +71,11 @@ export function StatusBar({
         </span>
       </span>
       <h1 className="text-sm font-semibold tracking-tight">convasist</h1>
+      {conversationTitle && (
+        <span className="max-w-[16rem] truncate rounded-full border border-ai/40 px-2 py-0.5 text-[11px] text-ai">
+          {conversationTitle}
+        </span>
+      )}
 
       <span
         className={`ml-auto max-w-[50%] truncate text-xs ${isError ? "text-rec" : "text-fg-muted"}`}
@@ -78,7 +89,7 @@ export function StatusBar({
         <>
           <button
             type="button"
-            disabled={busy}
+            disabled={busy || preparing}
             onClick={() => void (listening ? stop() : start())}
             className={[
               "rounded-md px-3 py-1 text-xs font-semibold disabled:opacity-50",
@@ -87,7 +98,7 @@ export function StatusBar({
                 : "bg-ok/90 text-bg hover:bg-ok",
             ].join(" ")}
           >
-            {listening ? "Stop" : "Start listening"}
+            {listening ? "Stop" : preparing ? "Preparing…" : "Start listening"}
           </button>
           {listening && (
             <button
@@ -134,6 +145,14 @@ export function StatusBar({
             }`}
           >
             Sidecar
+          </button>
+          <button
+            type="button"
+            onClick={onToggleConversations}
+            aria-label="Open or save a conversation"
+            className="rounded-md border border-border px-2 py-1 text-xs text-fg-muted hover:text-fg"
+          >
+            Conversations
           </button>
           <button
             type="button"

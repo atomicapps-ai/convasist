@@ -2,8 +2,11 @@ import { useEffect, useState } from "react";
 
 import { AssistDock } from "@/components/AssistDock";
 import { ConsentGate } from "@/components/ConsentGate";
+import { ConversationsPanel } from "@/components/ConversationsPanel";
 import { HealthStrip } from "@/components/HealthStrip";
+import { PreparingOverlay } from "@/components/PreparingOverlay";
 import { RagPanel } from "@/components/RagPanel";
+import { SaveConversationDialog } from "@/components/SaveConversationDialog";
 import { SessionsPanel } from "@/components/SessionsPanel";
 import { SettingsPanel } from "@/components/SettingsPanel";
 import { StatusBar } from "@/components/StatusBar";
@@ -12,7 +15,7 @@ import { TranscriptView } from "@/components/transcript/TranscriptView";
 import { useIpcBridge } from "@/lib/useIpcBridge";
 import { useAppStore } from "@/state/app";
 
-type Panel = "none" | "settings" | "library" | "sessions";
+type Panel = "none" | "settings" | "library" | "sessions" | "conversations";
 
 export default function App() {
   useIpcBridge();
@@ -31,6 +34,7 @@ export default function App() {
         onToggleSettings={() => toggle("settings")}
         onToggleLibrary={() => toggle("library")}
         onToggleSessions={() => toggle("sessions")}
+        onToggleConversations={() => toggle("conversations")}
       />
       {panel === "settings" && (
         <SettingsPanel onClose={() => setPanel("none")} />
@@ -39,6 +43,9 @@ export default function App() {
       {panel === "sessions" && (
         <SessionsPanel onClose={() => setPanel("none")} />
       )}
+      {panel === "conversations" && (
+        <ConversationsPanel onClose={() => setPanel("none")} />
+      )}
       <div className="flex min-h-0 flex-1">
         <TranscriptView />
         <TrackerRail />
@@ -46,6 +53,8 @@ export default function App() {
       <AssistDock />
       <HealthStrip />
       <ConsentGate />
+      <PreparingOverlay />
+      <SaveConversationDialog />
     </div>
   );
 }
