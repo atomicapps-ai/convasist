@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 
 import mark from "@/assets/brand/conva-mark-cutout-white.svg";
-import { Icon, type IconName } from "@/components/ui/Icon";
+import { NAV_ITEMS } from "@/components/studio/navItems";
+import { Icon } from "@/components/ui/Icon";
 import { useBackend } from "@/lib/backend";
 import { isTauri, type AuthStatus } from "@/lib/ipc";
 import { PLATFORM } from "@/lib/platform";
-import { useNavStore, type View } from "@/state/nav";
+import { useNavStore } from "@/state/nav";
 
 /**
  * The Studio's left instrument rail (52px). View selectors with the conva mark
@@ -13,28 +14,7 @@ import { useNavStore, type View } from "@/state/nav";
  * violet indicator on its leading edge and a violet-tinted chip (brand v2).
  */
 
-/**
- * The rail is data-driven so the two platforms extend ONE base list instead of
- * forking the component. `only` omitted → shown on both (base); set it to gate a
- * row to a platform. Web-only rows (an "Upgrade" CTA, say) just get
- * `only: "web"`; desktop-only rows `only: "desktop"`. This is the "web adds on
- * top of the base nav" seam — composition, not a NavRail subclass.
- */
-type NavItem = { view: View; icon: IconName; label: string; only?: "web" | "desktop" };
-
-const NAV_ITEMS: NavItem[] = [
-  { view: "dashboard", icon: "system", label: "Home" },
-  { view: "live", icon: "live", label: "Live" },
-  { view: "conversations", icon: "conversations", label: "Conversations" },
-  { view: "sessions", icon: "sessions", label: "Sessions" },
-  { view: "library", icon: "library", label: "Library" },
-  { view: "features", icon: "book", label: "What conva does" },
-  { view: "whatsnew", icon: "lightbulb", label: "What's Coming" },
-  { view: "settings", icon: "settings", label: "Settings" },
-  // e.g. a future web-only entry:  { view: "upgrade", icon: "lightbulb", label: "Upgrade", only: "web" },
-];
-
-/** The base list resolved for THIS platform (base rows + this platform's rows). */
+/** The shared nav list resolved for THIS platform (base rows + desktop rows). */
 const RAIL_ITEMS = NAV_ITEMS.filter((i) => !i.only || i.only === PLATFORM);
 
 function RailButton({

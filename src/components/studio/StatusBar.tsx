@@ -91,7 +91,7 @@ export function StatusBar() {
         title="Copy a diagnostics snapshot (and save a log file) for sharing"
         className="rounded px-1.5 py-0.5 font-mono text-[10px] text-fg-faint transition hover:bg-white/[0.06] hover:text-fg"
       >
-        build {BUILD.sha} · debug ⧉
+        v{BUILD.version} · build {BUILD.sha} · debug ⧉
       </button>
     </footer>
   );

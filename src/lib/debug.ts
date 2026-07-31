@@ -9,12 +9,17 @@ import { useAppStore } from "@/state/app";
 import { useTranscriptStore } from "@/state/transcript";
 
 export const BUILD = {
+  version: typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "0.0.0",
   sha: typeof __GIT_SHA__ === "string" ? __GIT_SHA__ : "unknown",
   time: typeof __BUILD_TIME__ === "string" ? __BUILD_TIME__ : "unknown",
 };
 
-// Log once at boot so the console always shows the running commit.
-console.log(`[conva] build ${BUILD.sha} · ${BUILD.time}`);
+/** `v0.1.1 · build a1b2c3` — version is what the user reports, sha is what
+ *  debugging needs. Keep both (SDLC §3.3). */
+export const VERSION_LABEL = `v${BUILD.version} · build ${BUILD.sha}`;
+
+// Log once at boot so the console always shows the running version + commit.
+console.log(`[conva] v${BUILD.version} · build ${BUILD.sha} · ${BUILD.time}`);
 
 /** Live measured geometry of a layout column tagged with data-col. */
 function colRect(name: string): string {
@@ -32,6 +37,7 @@ export function collectDebugReport(): string {
   const cfg = app.config;
   return [
     "conva debug report",
+    `version:    v${BUILD.version}`,
     `build:      ${BUILD.sha} · ${BUILD.time}`,
     `captured:   ${new Date().toISOString()}`,
     `tauri:      ${isTauri()}`,

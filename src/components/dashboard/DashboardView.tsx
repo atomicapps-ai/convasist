@@ -120,7 +120,9 @@ export function DashboardView() {
       title="Home"
       subtitle="Your conva account and quick access to the product."
     >
-      {/* Profile / access card. */}
+      {/* Profile / access card — DESKTOP only. On web, account + profile are the
+          website's job (the app carries zero auth/account UI). */}
+      {!isTauriRuntime() ? null : (
       <Section>
         <div className="flex items-center gap-4">
           <span
@@ -153,6 +155,7 @@ export function DashboardView() {
           </button>
         </div>
       </Section>
+      )}
 
       {/* Quick links into the product + market-facing surfaces. */}
       <Section title="Jump in">

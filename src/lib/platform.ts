@@ -26,3 +26,14 @@ export const PLATFORM: Platform = isTauriRuntime() ? "desktop" : "web";
 
 export const isWeb = PLATFORM === "web";
 export const isDesktop = PLATFORM === "desktop";
+
+/**
+ * True when the web app is embedded inside the website (an iframe under the
+ * getconva.com header, or `?embed=1`). The host site then owns the top-level
+ * chrome + login, so the app hides its own TopBar and doesn't self-redirect to
+ * login (see App.tsx / StudioShell). Standalone /app (full-screen) keeps both.
+ */
+export const isEmbedded =
+  typeof window !== "undefined" &&
+  (new URLSearchParams(window.location.search).has("embed") ||
+    window.self !== window.top);

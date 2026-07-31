@@ -14,6 +14,7 @@ export type View =
   | "conversations"
   | "features"
   | "whatsnew"
+  | "releases"
   | "settings"
   | "profile";
 

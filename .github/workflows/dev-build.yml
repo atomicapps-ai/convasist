@@ -1,0 +1,45 @@
+name: Dev build (beta)
+
+# On every push to `dev` (SDLC §5.2): stamp a `-beta.<run>` version and build
+# the installers, uploaded as workflow artifacts (NOT a public release). The
+# compile-level checks stay in ci.yml (which also runs on push to dev); this
+# workflow is the ~20-min packaging pass kept off the PR loop.
+#
+# `-beta.N` naming: the next MINOR + the run number (e.g. current 0.1.1 → the
+# betas of the next release are 0.2.0-beta.<run>). N never repeats (run_number
+# is monotonic). The stamp is build-time only — dev keeps its base version.
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  beta-version:
+    name: Compute beta version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - id: v
+        name: Next-minor -beta.<run_number>
+        run: |
+          BASE="$(node scripts/version.mjs get)"
+          NEXT="$(node -e "const p=process.argv[1].split('-')[0].split('.'); console.log(p[0]+'.'+(Number(p[1])+1)+'.0')" "$BASE")"
+          echo "version=${NEXT}-beta.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "Beta version: ${NEXT}-beta.${{ github.run_number }} (from base $BASE)"
+
+  build:
+    needs: beta-version
+    uses: ./.github/workflows/build-installers.yml
+    secrets: inherit
+    with:
+      version: ${{ needs.beta-version.outputs.version }}
+      release: false

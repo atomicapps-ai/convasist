@@ -32,24 +32,19 @@ const ANON_KEY: string =
   (import.meta.env?.CONVA_SUPABASE_ANON_KEY as string | undefined) || DEFAULT_ANON_KEY;
 
 /**
- * The shared login page (Layer 2 — conva_web). Derived from where the app is
- * served so one build works everywhere:
- *   app.getconva.com      → getconva.com/login.html
- *   app.dev.getconva.com  → dev.getconva.com/login.html   (strip the "app." host)
- *   localhost:1430        → CONVA_WEB_LOGIN_URL (the local site, another port)
- * Only localhost needs the env override — deployed subdomains derive it.
+ * The website's login page (Layer 2 — conva_web). The web app is a SECTION of
+ * the website (same origin, e.g. getconva.com/app), and login is the website's
+ * job — so in production login is simply `/login.html` on this same origin.
+ * Local dev runs the site on a different port, so allow an override there.
  */
 function loginUrl(): string {
   if (typeof window === "undefined") return "/login.html";
-  const { protocol, host, hostname } = window.location;
+  const { hostname } = window.location;
   const local = hostname === "localhost" || hostname === "127.0.0.1";
   if (local) {
-    return (
-      (import.meta.env?.CONVA_WEB_LOGIN_URL as string | undefined) ||
-      `${protocol}//${host}/login.html`
-    );
+    return (import.meta.env?.CONVA_WEB_LOGIN_URL as string | undefined) || "/login.html";
   }
-  return `${protocol}//${host.replace(/^app\./, "")}/login.html`;
+  return "/login.html";
 }
 
 interface WebSession {

@@ -2,10 +2,41 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
 
 jobs:
+  version-check:
+    name: Version + commit hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # The version carriers must agree (package.json = workspace Cargo.toml;
+      # tauri.conf.json references package.json so it's derived). SDLC §3.1.
+      - name: Version carriers agree
+        run: node scripts/version.mjs check
+      # PR title drives the semver bump + the git-cliff changelog, so it must be
+      # a Conventional Commit. SDLC §3.2.
+      - name: PR title is a Conventional Commit
+        if: github.event_name == 'pull_request'
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          echo "PR title: $TITLE"
+          echo "$TITLE" | grep -qiE '^(feat|fix|perf|refactor|docs|chore|ci|build|test|style|revert)(\([a-z0-9_-]+\))?!?: .+' \
+            || { echo "::error::PR title must be a Conventional Commit, e.g. 'feat: …' or 'fix(ui): …'. SDLC §3.2."; exit 1; }
+      # Every PR links an issue (a release ships exactly its milestone). SDLC §2.7.
+      - name: PR links an issue
+        if: github.event_name == 'pull_request'
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          echo "$BODY" | grep -qiE '(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+' \
+            || { echo "::error::PR body must link an issue with a closing keyword, e.g. 'Closes #12'. SDLC §2.7."; exit 1; }
+
   core:
     name: Core (lint + test, any OS)
     runs-on: ubuntu-latest

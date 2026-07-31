@@ -1,50 +1,28 @@
 import { useEffect } from "react";
 
 import { ConsentGate } from "@/components/ConsentGate";
-import { ConversationsPanel } from "@/components/ConversationsPanel";
-import { DashboardView } from "@/components/dashboard/DashboardView";
-import { FeaturesView } from "@/components/product/FeaturesView";
-import { WhatsComingView } from "@/components/product/WhatsComingView";
 import { PreparingOverlay } from "@/components/PreparingOverlay";
-import { ProfileView } from "@/components/profile/ProfileView";
-import { GateView, useAccessGate } from "@/components/web/GateView";
-import { RagPanel } from "@/components/RagPanel";
 import { SaveConversationDialog } from "@/components/SaveConversationDialog";
-import { SessionsPanel } from "@/components/SessionsPanel";
-import { SettingsPanel } from "@/components/SettingsPanel";
 import { CommandPalette } from "@/components/studio/CommandPalette";
 import { NavRail } from "@/components/studio/NavRail";
 import { StatusBar } from "@/components/studio/StatusBar";
 import { TopBar } from "@/components/studio/TopBar";
-import { TranscriptView } from "@/components/transcript/TranscriptView";
+import { ViewRouter } from "@/components/studio/ViewRouter";
 import { Icon } from "@/components/ui/Icon";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { useAppStore } from "@/state/app";
 import { useNavStore } from "@/state/nav";
 
-/** The live cockpit is the whole three-column instrument (transcript · spine ·
- *  Ally). Meters live in the top bar; Ally actions live in the Ally column. */
-function LiveView() {
-  return <TranscriptView />;
-}
-
 /**
- * The Studio shell (UI overhaul M2). One instrument: a left NavRail selecting
- * the active view, a curved TopBar carrying the Core + Start/Stop control, and
- * a routed content area. The former dropdown panels (Settings/Library/Sessions/
- * Conversations) are now first-class views; ⌘K opens the command palette from
- * anywhere. Replaces the old StatusBar + inline-panel App layout.
+ * The DESKTOP shell (UI overhaul M2): a left NavRail selecting the active view,
+ * a curved TopBar carrying the Core + Start/Stop control, and a routed content
+ * area (ViewRouter). Web uses a separate WebShell over the same views. ⌘K opens
+ * the command palette from anywhere.
  */
 export function StudioShell() {
-  const view = useNavStore((s) => s.view);
-  const setView = useNavStore((s) => s.setView);
   const togglePalette = useNavStore((s) => s.togglePalette);
   const compact = useAppStore((s) => s.compact);
   const toggleCompact = useAppStore((s) => s.toggleCompact);
-  const backToLive = () => setView("live");
-  // Beta allowlist (web): signed in without access → the gate replaces the
-  // product surface, whatever view the rail selects.
-  const gated = useAccessGate();
 
   // Global ⌘K / Ctrl+K → command palette.
   useEffect(() => {
@@ -66,23 +44,7 @@ export function StudioShell() {
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <TopBar />
           <main className="min-h-0 flex-1 overflow-hidden">
-            {gated ? (
-              <GateView />
-            ) : (
-              <>
-                {view === "dashboard" && <DashboardView />}
-                {view === "live" && <LiveView />}
-                {view === "features" && <FeaturesView />}
-                {view === "whatsnew" && <WhatsComingView />}
-                {view === "settings" && <SettingsPanel onClose={backToLive} />}
-                {view === "profile" && <ProfileView />}
-                {view === "library" && <RagPanel onClose={backToLive} />}
-                {view === "sessions" && <SessionsPanel onClose={backToLive} />}
-                {view === "conversations" && (
-                  <ConversationsPanel onClose={backToLive} />
-                )}
-              </>
-            )}
+            <ViewRouter />
           </main>
           <StatusBar />
         </div>

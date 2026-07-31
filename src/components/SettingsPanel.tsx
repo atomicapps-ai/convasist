@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AllySettings } from "@/components/AllySettings";
 import { Notice, Section, ViewShell } from "@/components/studio/ViewShell";
 import { useBackend } from "@/lib/backend";
+import { BUILD } from "@/lib/debug";
 import type {
   AuthStatus,
   SecretsStatus,
@@ -10,7 +11,40 @@ import type {
   WhisperModelInfo,
 } from "@/lib/ipc";
 import { isTauri } from "@/lib/ipc";
+import { isWeb } from "@/lib/platform";
 import { useAppStore } from "@/state/app";
+import { useNavStore } from "@/state/nav";
+
+/**
+ * About — the exact build the user is running (version + commit + build time),
+ * plus a jump to What's New. Belongs in Settings so a bug report can quote it;
+ * mirrors the status-bar stamp (SDLC §3.3). Rendered in both the configured and
+ * web-fallback Settings branches.
+ */
+function AboutSection() {
+  return (
+    <Section
+      title="About"
+      description="The exact build you're running — include this in any bug report."
+    >
+      <dl className="grid grid-cols-[6rem_1fr] gap-x-4 gap-y-1 text-[12px]">
+        <dt className="text-fg-faint">Version</dt>
+        <dd className="font-mono text-fg">v{BUILD.version}</dd>
+        <dt className="text-fg-faint">Build</dt>
+        <dd className="font-mono text-fg">{BUILD.sha}</dd>
+        <dt className="text-fg-faint">Built</dt>
+        <dd className="font-mono text-fg-muted">{BUILD.time}</dd>
+      </dl>
+      <button
+        type="button"
+        onClick={() => useNavStore.getState().setView("releases")}
+        className="btn mt-3"
+      >
+        What's new →
+      </button>
+    </Section>
+  );
+}
 
 function DeviceSelect({
   side,
@@ -569,6 +603,20 @@ function AccountSettings() {
     );
   }
 
+  // Web: login is the website's job — the app never shows a sign-in form. (The
+  // App guard already bounces unauthenticated web users to the website login;
+  // this is the belt-and-suspenders fallback if they ever land here signed out.)
+  if (isWeb) {
+    return (
+      <Notice>
+        Sign in on the website to use conva.{" "}
+        <a className="font-semibold text-fg underline" href="/login.html">
+          Go to sign in →
+        </a>
+      </Notice>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-3">
       <p className="text-[11px] leading-relaxed text-fg-faint">
@@ -694,25 +742,26 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshedAt, setRefreshedAt] = useState<number | null>(null);
   if (!config) {
-    // No config store on this surface yet (web: `GET /v1/settings` is roadmap
-    // 1.3) — but Account is live. Render it alone instead of a blank view.
+    // Web: no config store yet (`GET /v1/settings` is roadmap 1.3), and account
+    // is the website's job — so no account here. App settings only.
     return (
       <ViewShell
         icon="settings"
         title="Settings"
-        subtitle="Your account. Device and provider settings arrive with the hosted backend."
+        subtitle="App settings arrive with the hosted backend."
         actions={
           <button type="button" onClick={onClose} className="btn">
             Done
           </button>
         }
       >
-        <Section
-          title="Account"
-          description="Sign in for settings sync and plan management. Identity only — no conversation content leaves your device."
-        >
-          <AccountSettings />
+        <Section title="Settings">
+          <Notice>
+            Device, transcription, and Ally-provider settings arrive with the
+            hosted backend. Manage your account on the website.
+          </Notice>
         </Section>
+        <AboutSection />
       </ViewShell>
     );
   }
@@ -811,6 +860,8 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
       <Section title="Portable secrets">
         <SecretsSettings />
       </Section>
+
+      <AboutSection />
     </ViewShell>
   );
 }

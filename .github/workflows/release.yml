@@ -19,79 +19,44 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: windows-latest
-            name: Windows (GPU / Vulkan)
-            args: --features gpu-vulkan
-          - platform: macos-latest # Apple Silicon runner
-            name: macOS (GPU / Metal)
-            args: --features gpu-metal
-    name: ${{ matrix.name }}
-    runs-on: ${{ matrix.platform }}
+  # Gate the release: the tag MUST equal the checked-in version (the tag is the
+  # source of truth, SDLC §3.1), and generate the user-facing release notes from
+  # the Conventional-Commit log with git-cliff (SDLC §3.2). A mismatch fails the
+  # whole run before any installer is built.
+  version-guard:
+    name: Version guard + release notes
+    runs-on: ubuntu-latest
+    outputs:
+      notes: ${{ steps.cliff.outputs.content }}
     steps:
       - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: ". -> target"
-
+          fetch-depth: 0 # full history + tags for the changelog range
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-
-      # whisper.cpp's Vulkan backend needs the SDK (glslc + headers) at
-      # BUILD time only; end users just need a normal graphics driver.
-      - name: Install Vulkan SDK (Windows)
-        if: matrix.platform == 'windows-latest'
-        shell: pwsh
-        run: |
-          # LunarG's "latest" alias — pinned version URLs rot as releases
-          # cycle (a stale pin returns a tiny error body, not an installer).
-          $url = "https://sdk.lunarg.com/sdk/download/latest/windows/vulkan_sdk.exe"
-          $exe = "$env:RUNNER_TEMP\vulkan_sdk.exe"
-          curl.exe --retry 3 -L -o $exe $url
-          $size = (Get-Item $exe).Length
-          if ($size -lt 50MB) { throw "Vulkan SDK download looks wrong ($size bytes) — not an installer" }
-          Start-Process -FilePath $exe `
-            -ArgumentList "--accept-licenses","--default-answer","--confirm-command","install" -Wait
-          $sdk = (Get-ChildItem "C:\VulkanSDK" -Directory | Sort-Object Name | Select-Object -Last 1).FullName
-          if (-not $sdk) { throw "Vulkan SDK install dir not found under C:\VulkanSDK" }
-          Write-Host "Vulkan SDK at $sdk"
-          Add-Content $env:GITHUB_ENV "VULKAN_SDK=$sdk"
-          Add-Content $env:GITHUB_PATH "$sdk\Bin"
-
-      - run: npm ci
-
-      - name: Build and attach installers to a draft release
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Updater artifact signing (auto-update feed). Until the
-          # TAURI_SIGNING_PRIVATE_KEY secret is added, plain installers
-          # still build — only the update packages are skipped.
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+      - name: Tag equals package.json version
+        if: github.ref_type == 'tag'
+        run: node scripts/version.mjs check --tag "${{ github.ref_name }}"
+      - name: Generate release notes (git-cliff)
+        id: cliff
+        if: github.ref_type == 'tag'
+        uses: orhun/git-cliff-action@v4
         with:
-          tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
-          releaseName: ${{ github.ref_type == 'tag' && format('conva {0}', github.ref_name) || '' }}
-          releaseDraft: true
-          args: ${{ matrix.args }}
+          config: cliff.toml
+          args: --latest --strip header
 
-      # workflow_dispatch runs (no tag) still produce inspectable bundles.
-      - name: Upload bundles as workflow artifacts
-        if: github.ref_type != 'tag'
-        uses: actions/upload-artifact@v4
-        with:
-          name: bundles-${{ matrix.platform }}
-          path: |
-            target/release/bundle/msi/*.msi
-            target/release/bundle/nsis/*.exe
-            target/release/bundle/dmg/*.dmg
-            target/release/bundle/macos/*.app/**
-          if-no-files-found: warn
+  # Matrix build lives in the reusable build-installers.yml (SDLC §5.2). On a
+  # tag it attaches the installers to a DRAFT Release carrying the git-cliff
+  # notes; the owner publishes, which is what activates the updater rollout
+  # (§5.3, the single most dangerous auto-action). A workflow_dispatch run
+  # (no tag) builds and uploads bundles as artifacts instead.
+  build:
+    needs: version-guard
+    uses: ./.github/workflows/build-installers.yml
+    secrets: inherit
+    with:
+      release: ${{ github.ref_type == 'tag' }}
+      tag_name: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+      release_name: ${{ github.ref_type == 'tag' && format('conva {0}', github.ref_name) || '' }}
+      release_body: ${{ needs.version-guard.outputs.notes }}

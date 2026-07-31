@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "conva",
-  "version": "0.1.1",
+  "version": "../package.json",
   "identifier": "ai.atomicapps.conva",
   "build": {
     "beforeDevCommand": "npm run dev",
