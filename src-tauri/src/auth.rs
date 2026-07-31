@@ -98,7 +98,11 @@ fn supabase_url() -> String {
     std::env::var("CONVA_SUPABASE_URL")
         .ok()
         .filter(|s| !s.is_empty())
-        .or_else(|| option_env!("CONVA_SUPABASE_URL").filter(|s| !s.is_empty()).map(str::to_string))
+        .or_else(|| {
+            option_env!("CONVA_SUPABASE_URL")
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        })
         .unwrap_or_else(|| DEFAULT_SUPABASE_URL.to_string())
 }
 
@@ -106,7 +110,11 @@ fn anon_key() -> String {
     std::env::var("CONVA_SUPABASE_ANON_KEY")
         .ok()
         .filter(|s| !s.is_empty())
-        .or_else(|| option_env!("CONVA_SUPABASE_ANON_KEY").filter(|s| !s.is_empty()).map(str::to_string))
+        .or_else(|| {
+            option_env!("CONVA_SUPABASE_ANON_KEY")
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        })
         .unwrap_or_else(|| DEFAULT_ANON_KEY.to_string())
 }
 
