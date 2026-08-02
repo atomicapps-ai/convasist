@@ -28,6 +28,8 @@ pub mod events {
     pub const RADAR: &str = "conva://radar";
     /// Payload: [`super::TrackerEvent`]
     pub const TRACKER: &str = "conva://tracker";
+    /// Payload: [`super::RehearsalStateEvent`]
+    pub const REHEARSAL_STATE: &str = "conva://rehearsal-state";
     /// Payload: `AuthChangedEvent` — defined shell-side in
     /// `src-tauri/src/auth.rs` (next to `AuthStatus`, which never crosses into
     /// core) and mirrored in `src/lib/ipc.ts`. Emitted when an OAuth sign-in
@@ -100,6 +102,21 @@ pub struct RadarEvent {
 pub struct TrackerEvent {
     pub entities: Vec<crate::tracker::TrackedEntity>,
     pub commitments: Vec<crate::tracker::TrackedCommitment>,
+}
+
+/// Live Sim Con rehearsal phase (Phase E) — drives the "who's talking" UI
+/// (speaking animation + active-speaker indicator).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "phase")]
+pub enum RehearsalStateEvent {
+    /// Waiting for the user's turn (speak, or use a suggested answer).
+    Listening,
+    /// Generating the counterparty's reply.
+    Thinking,
+    /// The counterparty is speaking (TTS playing).
+    Speaking,
+    /// The rehearsal has ended.
+    Ended,
 }
 
 /// ASR model provisioning progress (T6 first-run downloader).

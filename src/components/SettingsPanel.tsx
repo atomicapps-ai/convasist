@@ -2,11 +2,14 @@ import { useCallback, useEffect, useState } from "react";
 
 import { AllySettings } from "@/components/AllySettings";
 import { Notice, Section, ViewShell } from "@/components/studio/ViewShell";
+import { Icon } from "@/components/ui/Icon";
 import { useBackend } from "@/lib/backend";
 import type {
   AuthStatus,
+  ProviderInfo,
   SecretsStatus,
   StreamSide,
+  UsageSummary,
   WhisperModelInfo,
 } from "@/lib/ipc";
 import { isTauri } from "@/lib/ipc";
@@ -294,6 +297,231 @@ function ConfigFileControls() {
 /** Portable encrypted secrets: export API keys to a git-committable file and
  *  load them on another machine. The passphrase comes from an env var, so the
  *  file is safe to commit and keys never re-typed per launch. */
+/**
+ * Web-research key (Sim Con). A Tavily key lets a Sim Con research the web for
+ * context during setup; stored in the OS vault, desktop-only. Without it, Sim
+ * Cons ground on the user's documents alone.
+ */
+function ResearchSettings() {
+  const backend = useBackend();
+  const [hasKey, setHasKey] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    void backend.simcon
+      .researchKeyStatus()
+      .then(setHasKey)
+      .catch(() => {});
+  }, [backend]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await backend.simcon.setResearchKey(draft.trim());
+      setDraft("");
+      setHasKey(await backend.simcon.researchKeyStatus());
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-[12px] leading-relaxed text-fg-muted">
+        A <b>Tavily</b> key lets a Sim Con research the web for context (standard
+        questions, company background, market rates) when you build one — get a
+        free key at <span className="font-mono">tavily.com</span>. Without it, Sim
+        Cons ground on your documents only.
+      </p>
+      <div className="flex items-end gap-2">
+        <label className="field flex-1">
+          Tavily API key {hasKey && <span className="text-ok">· saved</span>}
+          <input
+            className="input"
+            type="password"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={hasKey ? "•••••••• (saved)" : "tvly-…"}
+          />
+        </label>
+        <button
+          type="button"
+          className="btn shrink-0"
+          disabled={saving}
+          onClick={() => void save()}
+        >
+          {saving ? "Saving…" : draft.trim() || !hasKey ? "Save" : "Clear"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Usage metering. Shows what the configured keys have been spent on — LLM
+ * tokens per provider and Tavily web searches (Tavily bills per search, not per
+ * token) — with running totals. BYO-key desktop = visibility; the hosted future
+ * turns the same counts into billable credits (roadmap F8b).
+ */
+function UsageSettings() {
+  const backend = useBackend();
+  const [usage, setUsage] = useState<UsageSummary | null>(null);
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [confirming, setConfirming] = useState(false);
+
+  useEffect(() => {
+    void backend.usage.summary().then(setUsage).catch(() => {});
+    void backend.providers.registry().then(setProviders).catch(() => {});
+  }, [backend]);
+
+  const nameFor = (id: string) =>
+    providers.find((p) => p.id === id)?.name ?? id;
+
+  const reset = async () => {
+    try {
+      setUsage(await backend.usage.reset());
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  const fmt = (n: number) => n.toLocaleString();
+  const hasUsage =
+    !!usage &&
+    (usage.providers.length > 0 ||
+      usage.tavily_searches > 0 ||
+      usage.tts_characters > 0);
+
+  if (!usage) return null;
+
+  return (
+    <div className="flex flex-col gap-2.5">
+      <p className="text-[12px] leading-relaxed text-fg-muted">
+        What your keys have handled on this machine — LLM tokens per provider and{" "}
+        <b>Tavily</b> web searches (billed per search, not per token). Everything
+        runs on your own keys, so this is for your visibility.
+      </p>
+
+      {!hasUsage ? (
+        <p className="text-[11px] text-fg-faint" role="status">
+          No usage recorded yet. Ask Ally something or build a Sim Con to start
+          the meter.
+        </p>
+      ) : (
+        <div className="rounded-lg border border-border bg-bg/40">
+          {/* LLM tokens per provider */}
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr className="border-b border-border text-left text-[10px] uppercase tracking-wide text-fg-faint">
+                <th className="py-1.5 pl-3 pr-2 font-medium">Provider</th>
+                <th className="px-2 py-1.5 text-right font-medium">Input</th>
+                <th className="px-2 py-1.5 text-right font-medium">Output</th>
+                <th className="py-1.5 pl-2 pr-3 text-right font-medium">Requests</th>
+              </tr>
+            </thead>
+            <tbody>
+              {usage.providers.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={4}
+                    className="px-3 py-2 text-[11px] text-fg-faint"
+                  >
+                    No LLM usage yet.
+                  </td>
+                </tr>
+              ) : (
+                usage.providers.map((p) => (
+                  <tr key={p.provider} className="border-b border-border/60">
+                    <td className="py-1.5 pl-3 pr-2 text-fg">
+                      {nameFor(p.provider)}
+                    </td>
+                    <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fg-muted">
+                      {fmt(p.input_tokens)}
+                    </td>
+                    <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fg-muted">
+                      {fmt(p.output_tokens)}
+                    </td>
+                    <td className="py-1.5 pl-2 pr-3 text-right font-mono tabular-nums text-fg-muted">
+                      {fmt(p.requests)}
+                    </td>
+                  </tr>
+                ))
+              )}
+              {/* Running total */}
+              <tr className="font-medium text-fg">
+                <td className="py-1.5 pl-3 pr-2">Total</td>
+                <td className="px-2 py-1.5 text-right font-mono tabular-nums">
+                  {fmt(usage.total_input_tokens)}
+                </td>
+                <td className="px-2 py-1.5 text-right font-mono tabular-nums">
+                  {fmt(usage.total_output_tokens)}
+                </td>
+                <td className="py-1.5 pl-2 pr-3 text-right font-mono tabular-nums">
+                  {fmt(usage.total_requests)}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          {/* Tavily searches — a separate meter (per-search billing). */}
+          <div className="flex items-center justify-between border-t border-border px-3 py-2 text-[12px]">
+            <span className="text-fg-muted">Web searches (Tavily)</span>
+            <span className="font-mono tabular-nums text-fg">
+              {fmt(usage.tavily_searches)}
+            </span>
+          </div>
+          {/* Aura TTS characters — separate meter (per-character billing). */}
+          <div className="flex items-center justify-between border-t border-border px-3 py-2 text-[12px]">
+            <span className="text-fg-muted">Voice characters (Aura TTS)</span>
+            <span className="font-mono tabular-nums text-fg">
+              {fmt(usage.tts_characters)}
+            </span>
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-center gap-2">
+        <span className="flex-1 text-[11px] text-fg-faint">
+          {usage.since_unix_ms > 0
+            ? `Since ${new Date(usage.since_unix_ms).toLocaleDateString()}`
+            : "Nothing recorded yet."}
+        </span>
+        {hasUsage &&
+          (confirming ? (
+            <span className="flex items-center gap-2 text-[11px]">
+              <span className="text-fg-muted">Reset all counters?</span>
+              <button
+                type="button"
+                onClick={() => void reset()}
+                className="btn h-6 px-2 text-[11px] text-rec"
+              >
+                Reset
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirming(false)}
+                className="text-fg-faint hover:text-fg"
+              >
+                Cancel
+              </button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirming(true)}
+              aria-label="Reset usage counters"
+              title="Reset usage counters"
+              className="rounded-sm p-1.5 text-fg-faint transition hover:bg-rec/10 hover:text-rec"
+            >
+              <Icon name="trash" size={15} />
+            </button>
+          ))}
+      </div>
+    </div>
+  );
+}
+
 function SecretsSettings() {
   const backend = useBackend();
   const [status, setStatus] = useState<SecretsStatus | null>(null);
@@ -806,6 +1034,20 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         }
       >
         <ConfigFileControls />
+      </Section>
+
+      <Section
+        title="Web research (Sim Con)"
+        description="Optional — a Tavily key so a Sim Con can research context from the web."
+      >
+        <ResearchSettings />
+      </Section>
+
+      <Section
+        title="Usage"
+        description="What your API keys have been spent on — LLM tokens and web searches."
+      >
+        <UsageSettings />
       </Section>
 
       <Section title="Portable secrets">

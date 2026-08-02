@@ -26,6 +26,7 @@ const NAV_ITEMS: NavItem[] = [
   { view: "dashboard", icon: "system", label: "Home" },
   { view: "live", icon: "live", label: "Live" },
   { view: "conversations", icon: "conversations", label: "Conversations" },
+  { view: "simcon", icon: "simicon", label: "Sim Con" },
   { view: "sessions", icon: "sessions", label: "Sessions" },
   { view: "library", icon: "library", label: "Library" },
   { view: "features", icon: "book", label: "What conva does" },

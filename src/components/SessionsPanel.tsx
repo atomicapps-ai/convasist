@@ -99,8 +99,22 @@ export function SessionsPanel({ onClose }: { onClose: () => void }) {
                 <span className="font-mono text-[11px] text-fg-muted">
                   {formatDate(s.started_at_unix_ms)}
                 </span>
+                {s.is_rehearsal && (
+                  <span
+                    title={
+                      s.simcon_title
+                        ? `Sim Con rehearsal: ${s.simcon_title}`
+                        : "Sim Con rehearsal"
+                    }
+                    className="shrink-0 rounded-sm border border-ai/40 bg-ai/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ai"
+                  >
+                    Sim Con
+                  </span>
+                )}
                 <span className="truncate text-xs text-fg">
-                  {s.preview || "(empty)"}
+                  {s.is_rehearsal && s.simcon_title
+                    ? s.simcon_title
+                    : s.preview || "(empty)"}
                 </span>
                 <span className="ml-auto shrink-0 font-mono text-[10px] text-fg-faint">
                   {s.segment_count} segments

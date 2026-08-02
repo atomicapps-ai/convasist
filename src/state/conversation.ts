@@ -21,6 +21,8 @@ interface ConversationState {
 
   setSavePromptOpen: (open: boolean) => void;
   setNotice: (notice: string | null) => void;
+  /** Pre-fill the save-dialog title (e.g. mark a rehearsal as a Sim Con). */
+  setTitle: (title: string | null) => void;
   /** Show a loaded conversation and make it the open one. */
   openConversation: (conversation: Conversation) => void;
   /** Close the current conversation and clear the screen. */
@@ -42,6 +44,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
 
   setSavePromptOpen: (open) => set({ savePromptOpen: open }),
   setNotice: (notice) => set({ notice }),
+  setTitle: (title) => set({ title }),
 
   openConversation: (conversation) => {
     const transcript = useTranscriptStore.getState();

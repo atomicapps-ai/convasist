@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { useBackend } from "@/lib/backend";
 import { useAppStore } from "@/state/app";
 import { useAllyStore } from "@/state/ally";
+import { useRehearsalStore } from "@/state/rehearsal";
 import { useTranscriptStore } from "@/state/transcript";
 
 /**
@@ -21,6 +22,7 @@ export function useIpcBridge(): void {
   const applyAllySources = useAllyStore((s) => s.applySources);
   const applyRadar = useAllyStore((s) => s.applyRadar);
   const applyTracker = useAllyStore((s) => s.applyTracker);
+  const applyRehearsalPhase = useRehearsalStore((s) => s.applyPhase);
 
   useEffect(() => {
     const unlisteners: Array<() => void> = [];
@@ -36,6 +38,7 @@ export function useIpcBridge(): void {
         backend.subscribe("allySources", applyAllySources),
         backend.subscribe("radar", applyRadar),
         backend.subscribe("tracker", applyTracker),
+        backend.subscribe("rehearsalState", applyRehearsalPhase),
       ]);
       if (cancelled) {
         subs.forEach((un) => un());
@@ -58,5 +61,6 @@ export function useIpcBridge(): void {
     applyAllySources,
     applyRadar,
     applyTracker,
+    applyRehearsalPhase,
   ]);
 }

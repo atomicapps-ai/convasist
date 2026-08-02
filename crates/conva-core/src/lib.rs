@@ -20,9 +20,11 @@ pub mod fuse;
 pub mod highlight;
 pub mod ipc;
 pub mod llm;
+pub mod metering;
 pub mod prompt;
 pub mod radar;
 pub mod rag;
+pub mod simcon;
 pub mod tracker;
 pub mod vad;
 

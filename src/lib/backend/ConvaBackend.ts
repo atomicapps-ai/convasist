@@ -24,6 +24,9 @@ import type {
   AuthStatus,
   Conversation,
   ConversationSummary,
+  KnowledgeProfile,
+  SimConSession,
+  SimConSummary,
   IngestReport,
   ModelInfo,
   ProviderId,
@@ -33,6 +36,7 @@ import type {
   SecretsStatus,
   SessionSummary,
   TranscriptSegment,
+  UsageSummary,
   WhisperModelInfo,
 } from "@/lib/ipc";
 import type { Capabilities } from "@/lib/backend/capabilities";
@@ -119,6 +123,8 @@ export interface ConvaBackend {
     syncLibrary(): Promise<string>;
     /** RAG-relevant phrases in a message, for transcript highlighting. */
     analyzeTerms(text: string): Promise<string[]>;
+    /** Reconstruct a document's text by id (e.g. to view the Ally dossier). */
+    documentText(id: string): Promise<string | null>;
   };
 
   /** Portable encrypted secrets (`conva.secrets.enc`). Desktop-only (Layer 4). */
@@ -157,6 +163,48 @@ export interface ConvaBackend {
     list(): Promise<ConversationSummary[]>;
     load(id: string): Promise<Conversation>;
     delete(id: string): Promise<void>;
+  };
+
+  /** SimCon — Simulated Conversation records. Local on desktop; cloud on web. */
+  simcon: {
+    /** Create or update; an empty `id` mints a new record. */
+    save(session: SimConSession): Promise<SimConSession>;
+    list(): Promise<SimConSummary[]>;
+    load(id: string): Promise<SimConSession>;
+    delete(id: string): Promise<void>;
+    /** Copy documents into this Sim Con's folder; returns paths to ingest. */
+    storeDocs(title: string, paths: string[]): Promise<string[]>;
+    /** Build the reusable knowledge profile (docs + research) and mark ready. */
+    prepare(id: string): Promise<SimConSession>;
+    /** Load a knowledge profile (attached docs + researched sources) by id. */
+    loadProfile(profileId: string): Promise<KnowledgeProfile>;
+    /** Generate the Ally prep dossier (saved to the library). */
+    generateDossier(id: string): Promise<SimConSession>;
+    /** Generate 3 counterparty personas with the LLM. */
+    generatePersonas(id: string): Promise<SimConSession>;
+    /** Record the persona the user will rehearse against. */
+    choosePersona(id: string, personaId: string): Promise<SimConSession>;
+    /** Start a live rehearsal (mic → persona LLM → Aura TTS). Returns session id. */
+    startRehearsal(id: string): Promise<string>;
+    /** End the user's current rehearsal turn now (manual "your turn"). */
+    rehearsalYourTurn(): Promise<void>;
+    /** Inject a typed turn (e.g. an Ally-suggested answer) as the user's turn. */
+    rehearsalSay(text: string): Promise<void>;
+    /** Store (empty clears) the Tavily web-research key. */
+    setResearchKey(key: string): Promise<void>;
+    /** Whether a web-research key is configured. */
+    researchKeyStatus(): Promise<boolean>;
+  };
+
+  /**
+   * Usage metering — LLM tokens per provider + Tavily searches. Desktop keeps a
+   * local BYO-key ledger (`usage.json`); the hosted future reports server-side
+   * credit balances (roadmap F8b).
+   */
+  usage: {
+    summary(): Promise<UsageSummary>;
+    /** Clear all counters; returns the emptied snapshot. */
+    reset(): Promise<UsageSummary>;
   };
 
   /** Auto-persisted session transcripts + export. */

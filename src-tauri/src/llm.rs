@@ -12,19 +12,21 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
-use conva_core::llm::{LlmRequest, ModelInfo, ProviderId};
+use conva_core::llm::{LlmRequest, ModelInfo, ProviderId, TokenUsage};
 use conva_core::CoreError;
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Streaming completion: `on_token` receives text deltas as they arrive.
+/// Returns the provider-reported [`TokenUsage`] for metering (zeros when the
+/// provider doesn't report usage, e.g. some local endpoints).
 pub fn stream_completion(
     provider: ProviderId,
     api_key: &str,
     model: &str,
     request: &LlmRequest,
     on_token: &mut dyn FnMut(&str),
-) -> Result<(), CoreError> {
+) -> Result<TokenUsage, CoreError> {
     match provider {
         ProviderId::Anthropic => anthropic_stream(api_key, model, request, on_token),
         ProviderId::Openai | ProviderId::Xai | ProviderId::Deepseek | ProviderId::OllamaLocal => {
@@ -44,6 +46,8 @@ pub fn validate_key(provider: ProviderId, api_key: &str, model: &str) -> Result<
     };
     let started = Instant::now();
     let mut first: Option<u32> = None;
+    // The Test button is a diagnostic ping, not feature usage, so its tokens are
+    // intentionally not recorded in the usage ledger.
     stream_completion(provider, api_key, model, &request, &mut |_| {
         first.get_or_insert_with(|| started.elapsed().as_millis() as u32);
     })?;
@@ -137,7 +141,7 @@ fn anthropic_stream(
     model: &str,
     request: &LlmRequest,
     on_token: &mut dyn FnMut(&str),
-) -> Result<(), CoreError> {
+) -> Result<TokenUsage, CoreError> {
     let response = ureq::post("https://api.anthropic.com/v1/messages")
         .timeout(HTTP_TIMEOUT)
         .set("x-api-key", api_key)
@@ -152,13 +156,180 @@ fn anthropic_stream(
         }))
         .map_err(map_ureq)?;
 
+    // Anthropic reports input tokens in `message_start` and the (cumulative)
+    // output count in each `message_delta` — keep the latest of each.
+    let mut usage = TokenUsage::default();
     for_each_sse_data(response.into_reader(), |value| {
-        if value["type"] == "content_block_delta" {
-            if let Some(text) = value["delta"]["text"].as_str() {
-                on_token(text);
+        match value["type"].as_str() {
+            Some("content_block_delta") => {
+                if let Some(text) = value["delta"]["text"].as_str() {
+                    on_token(text);
+                }
             }
+            Some("message_start") => {
+                let u = &value["message"]["usage"];
+                if let Some(n) = u["input_tokens"].as_u64() {
+                    usage.input_tokens = n;
+                }
+                if let Some(n) = u["output_tokens"].as_u64() {
+                    usage.output_tokens = n;
+                }
+            }
+            Some("message_delta") => {
+                if let Some(n) = value["usage"]["output_tokens"].as_u64() {
+                    usage.output_tokens = n;
+                }
+            }
+            _ => {}
         }
-    })
+    })?;
+    Ok(usage)
+}
+
+/// Anthropic streaming **with tool use** — the Ally web-search loop. Streams
+/// assistant text via `on_token`; when the model requests a tool, `run_tool(name,
+/// input)` is called and its string output is fed back as a `tool_result`, up to
+/// `max_rounds` tool rounds (tools are withheld on the final round so the loop
+/// always terminates in a text answer). Returns the token usage **summed across
+/// every round** — so metering captures the full cost of a tool-assisted answer.
+///
+/// The common case (model answers without searching) is a single request, no
+/// slower than [`anthropic_stream`]; the extra round-trip is paid only when the
+/// model actually calls a tool.
+#[allow(clippy::too_many_arguments)]
+pub fn anthropic_stream_with_tools(
+    api_key: &str,
+    model: &str,
+    request: &LlmRequest,
+    tools: &Value,
+    on_token: &mut dyn FnMut(&str),
+    run_tool: &mut dyn FnMut(&str, &Value) -> String,
+    max_rounds: usize,
+) -> Result<TokenUsage, CoreError> {
+    use std::collections::HashMap;
+
+    let mut messages: Vec<Value> = vec![json!({"role": "user", "content": request.user})];
+    let mut total = TokenUsage::default();
+
+    for round in 0..=max_rounds {
+        // Offer tools only while another round remains; the final round forces a
+        // plain text answer so the conversation can't loop forever.
+        let offer_tools = round < max_rounds;
+        let mut body = json!({
+            "model": model,
+            "max_tokens": request.max_tokens,
+            "system": request.system,
+            "messages": messages,
+            "stream": true,
+        });
+        if offer_tools {
+            body["tools"] = tools.clone();
+        }
+
+        let response = ureq::post("https://api.anthropic.com/v1/messages")
+            .timeout(HTTP_TIMEOUT)
+            .set("x-api-key", api_key)
+            .set("anthropic-version", "2023-06-01")
+            .set("content-type", "application/json")
+            .send_json(body)
+            .map_err(map_ureq)?;
+
+        let mut round_usage = TokenUsage::default();
+        let mut stop_reason = String::new();
+        let mut text_acc = String::new();
+        // Tool-use blocks captured this round: (id, name, accumulated input JSON).
+        let mut tool_blocks: Vec<(String, String, String)> = Vec::new();
+        // SSE content-block index -> position in `tool_blocks` (absent = text).
+        let mut index_to_tool: HashMap<u64, usize> = HashMap::new();
+
+        for_each_sse_data(response.into_reader(), |value| {
+            match value["type"].as_str() {
+                Some("message_start") => {
+                    let u = &value["message"]["usage"];
+                    if let Some(n) = u["input_tokens"].as_u64() {
+                        round_usage.input_tokens = n;
+                    }
+                    if let Some(n) = u["output_tokens"].as_u64() {
+                        round_usage.output_tokens = n;
+                    }
+                }
+                Some("content_block_start") => {
+                    let cb = &value["content_block"];
+                    if cb["type"] == "tool_use" {
+                        let idx = value["index"].as_u64().unwrap_or(0);
+                        tool_blocks.push((
+                            cb["id"].as_str().unwrap_or("").to_string(),
+                            cb["name"].as_str().unwrap_or("").to_string(),
+                            String::new(),
+                        ));
+                        index_to_tool.insert(idx, tool_blocks.len() - 1);
+                    }
+                }
+                Some("content_block_delta") => {
+                    let delta = &value["delta"];
+                    match delta["type"].as_str() {
+                        Some("text_delta") => {
+                            if let Some(t) = delta["text"].as_str() {
+                                text_acc.push_str(t);
+                                on_token(t);
+                            }
+                        }
+                        Some("input_json_delta") => {
+                            let idx = value["index"].as_u64().unwrap_or(0);
+                            if let (Some(pos), Some(pj)) = (
+                                index_to_tool.get(&idx).copied(),
+                                delta["partial_json"].as_str(),
+                            ) {
+                                tool_blocks[pos].2.push_str(pj);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Some("message_delta") => {
+                    if let Some(sr) = value["delta"]["stop_reason"].as_str() {
+                        stop_reason = sr.to_string();
+                    }
+                    if let Some(n) = value["usage"]["output_tokens"].as_u64() {
+                        round_usage.output_tokens = n;
+                    }
+                }
+                _ => {}
+            }
+        })?;
+
+        total.input_tokens = total.input_tokens.saturating_add(round_usage.input_tokens);
+        total.output_tokens = total
+            .output_tokens
+            .saturating_add(round_usage.output_tokens);
+
+        // No tool requested → this round's text is the final answer.
+        if stop_reason != "tool_use" || tool_blocks.is_empty() {
+            break;
+        }
+
+        // Echo the assistant turn (text + tool_use) back, then answer each
+        // tool_use with a tool_result, and let the model continue next round.
+        let mut assistant_content: Vec<Value> = Vec::new();
+        if !text_acc.trim().is_empty() {
+            assistant_content.push(json!({"type": "text", "text": text_acc}));
+        }
+        let mut tool_results: Vec<Value> = Vec::new();
+        for (id, name, json_buf) in &tool_blocks {
+            let input: Value = serde_json::from_str(json_buf).unwrap_or_else(|_| json!({}));
+            assistant_content.push(json!({
+                "type": "tool_use", "id": id, "name": name, "input": input,
+            }));
+            let result_text = run_tool(name, &input);
+            tool_results.push(json!({
+                "type": "tool_result", "tool_use_id": id, "content": result_text,
+            }));
+        }
+        messages.push(json!({"role": "assistant", "content": assistant_content}));
+        messages.push(json!({"role": "user", "content": tool_results}));
+    }
+
+    Ok(total)
 }
 
 // ------------------------------------------------------- OpenAI-compatible
@@ -179,7 +350,7 @@ fn openai_compatible_stream(
     model: &str,
     request: &LlmRequest,
     on_token: &mut dyn FnMut(&str),
-) -> Result<(), CoreError> {
+) -> Result<TokenUsage, CoreError> {
     let url = format!("{}/chat/completions", openai_base(provider));
     let mut req = ureq::post(&url)
         .timeout(HTTP_TIMEOUT)
@@ -196,14 +367,27 @@ fn openai_compatible_stream(
                 {"role": "user", "content": request.user},
             ],
             "stream": true,
+            // Ask for a final usage chunk (ignored by providers that don't
+            // support it — those simply report zeros).
+            "stream_options": {"include_usage": true},
         }))
         .map_err(map_ureq)?;
 
+    let mut usage = TokenUsage::default();
     for_each_sse_data(response.into_reader(), |value| {
         if let Some(text) = value["choices"][0]["delta"]["content"].as_str() {
             on_token(text);
         }
-    })
+        // The final chunk (empty `choices`) carries cumulative usage.
+        let u = &value["usage"];
+        if let Some(n) = u["prompt_tokens"].as_u64() {
+            usage.input_tokens = n;
+        }
+        if let Some(n) = u["completion_tokens"].as_u64() {
+            usage.output_tokens = n;
+        }
+    })?;
+    Ok(usage)
 }
 
 // ------------------------------------------------------------------ Gemini
@@ -213,7 +397,7 @@ fn gemini_stream(
     model: &str,
     request: &LlmRequest,
     on_token: &mut dyn FnMut(&str),
-) -> Result<(), CoreError> {
+) -> Result<TokenUsage, CoreError> {
     let url = format!(
         "https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse"
     );
@@ -228,6 +412,8 @@ fn gemini_stream(
         }))
         .map_err(map_ureq)?;
 
+    // Gemini reports cumulative `usageMetadata` on each chunk — keep the latest.
+    let mut usage = TokenUsage::default();
     for_each_sse_data(response.into_reader(), |value| {
         if let Some(parts) = value["candidates"][0]["content"]["parts"].as_array() {
             for part in parts {
@@ -236,7 +422,15 @@ fn gemini_stream(
                 }
             }
         }
-    })
+        let meta = &value["usageMetadata"];
+        if let Some(n) = meta["promptTokenCount"].as_u64() {
+            usage.input_tokens = n;
+        }
+        if let Some(n) = meta["candidatesTokenCount"].as_u64() {
+            usage.output_tokens = n;
+        }
+    })?;
+    Ok(usage)
 }
 
 // -------------------------------------------------------------- key vault

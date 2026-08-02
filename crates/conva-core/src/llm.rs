@@ -131,6 +131,20 @@ pub struct ModelInfo {
     pub display_name: String,
 }
 
+/// Token counts a provider reports for one completion (metering, §F8b). Providers
+/// that don't report usage (e.g. some local endpoints) leave these at zero.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TokenUsage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+
+impl TokenUsage {
+    pub fn total(&self) -> u64 {
+        self.input_tokens.saturating_add(self.output_tokens)
+    }
+}
+
 /// A streaming LLM provider. Implementations live in `src-tauri` (one file
 /// per provider) and normalize each provider's SSE schema into `LlmChunk`s.
 #[async_trait]

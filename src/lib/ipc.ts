@@ -45,6 +45,13 @@ export type SessionStateEvent =
   | { state: "paused"; session_id: string }
   | { state: "error"; message: string };
 
+/** Live Sim Con rehearsal phase — drives the speaking/active-speaker UI. */
+export type RehearsalStateEvent =
+  | { phase: "listening" }
+  | { phase: "thinking" }
+  | { phase: "speaking" }
+  | { phase: "ended" };
+
 export interface AllyChunkEvent {
   request_id: string;
   token: string;
@@ -157,6 +164,10 @@ export interface SessionSummary {
   started_at_unix_ms: number;
   segment_count: number;
   preview: string;
+  /** True when this session was a Sim Con rehearsal. */
+  is_rehearsal: boolean;
+  /** The Sim Con title, when this was a rehearsal. */
+  simcon_title: string | null;
 }
 
 /** Mirror of the shell's conversations::Conversation (named saved record). */
@@ -178,6 +189,90 @@ export interface ConversationSummary {
   segment_count: number;
   linked_docs: string[];
   preview: string;
+}
+
+/* ── SimCon — Simulated Conversation (mirror of conva_core::simcon) ──────────
+   A rehearsal of a high-stakes call: setup → knowledge profile (docs + bounded
+   web research) → generated personas → real-time run. Persistence + pipeline
+   land in the shell (Phase A.2). Keep these in lockstep with
+   `crates/conva-core/src/simcon.rs`. */
+
+/** The kind of call being rehearsed. */
+export type SimConCategory =
+  | "interview"
+  | "financial_review"
+  | "performance_review"
+  | "sales_pitch"
+  | "other";
+
+/** Lifecycle of a SimCon, start to finish. */
+export type SimConStatus =
+  | "draft"
+  | "ingesting"
+  | "ready"
+  | "running"
+  | "ended";
+
+/** One generated counterparty persona/strategy option (3 per session). */
+export interface SimConPersona {
+  id: string;
+  title: string;
+  summary: string;
+  style_tags: string[];
+  recommended: boolean;
+}
+
+/** A web-research source folded into a knowledge profile. */
+export interface ResearchSource {
+  title: string;
+  url: string;
+  snippet: string;
+  fetched_at_unix_ms: number;
+}
+
+/** The reusable, indexed knowledge base for a SimCon (library docs + web
+ *  research). Reusable across future SimCons and live calls, by id. */
+export interface KnowledgeProfile {
+  id: string;
+  title: string;
+  created_at_unix_ms: number;
+  updated_at_unix_ms: number;
+  doc_ids: string[];
+  research: ResearchSource[];
+  ready: boolean;
+}
+
+/** One simulated-conversation record: Step 1 setup through Step 4 run. */
+export interface SimConSession {
+  id: string;
+  title: string;
+  purpose: string;
+  /** For interviews: the target role's job description (Step 1). */
+  job_description: string | null;
+  category: SimConCategory;
+  status: SimConStatus;
+  created_at_unix_ms: number;
+  updated_at_unix_ms: number;
+  /** Library docs attached at setup (Path A) — RagDocument ids. */
+  source_doc_ids: string[];
+  /** Whether Ally should auto-generate context (Path B) during ingest. */
+  auto_generate_context: boolean;
+  knowledge_profile_id: string | null;
+  personas: SimConPersona[];
+  chosen_persona_id: string | null;
+  conversation_id: string | null;
+  /** RagDocument id of the Ally-generated prep briefing, once generated. */
+  dossier_doc_id: string | null;
+}
+
+/** Catalog entry for the SimCon list view. */
+export interface SimConSummary {
+  id: string;
+  title: string;
+  category: SimConCategory;
+  status: SimConStatus;
+  created_at_unix_ms: number;
+  updated_at_unix_ms: number;
 }
 
 export type ModelStatusEvent =
@@ -206,6 +301,34 @@ export interface ProviderInfo {
 export interface ModelSelection {
   provider: ProviderId;
   model: string;
+}
+
+/* ── Usage metering (mirror of conva_core::metering) ────────────────────────
+   LLM tokens per provider + Tavily search count, for Settings → Usage. On the
+   desktop this is BYO-key visibility; the hosted future turns it into billable
+   credits (roadmap F8b). */
+
+/** Running LLM usage for one provider. */
+export interface ProviderUsage {
+  provider: ProviderId;
+  input_tokens: number;
+  output_tokens: number;
+  requests: number;
+}
+
+/** Usage snapshot with cross-provider running totals. */
+export interface UsageSummary {
+  providers: ProviderUsage[];
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_requests: number;
+  /** Tavily searches (Tavily bills per search, not per token). */
+  tavily_searches: number;
+  /** TTS characters synthesized (Aura bills per character). */
+  tts_characters: number;
+  /** When the current window opened (first record / last reset); 0 = never. */
+  since_unix_ms: number;
+  updated_at_unix_ms: number;
 }
 
 export interface AppConfig {

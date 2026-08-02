@@ -138,8 +138,9 @@ fn run_extraction(
         &request,
         &mut |token| reply.push_str(token),
     );
-    if result.is_err() {
-        return; // best-effort: skip this pass
+    match result {
+        Ok(usage) => crate::metering::record_llm(app, selection.provider, usage),
+        Err(_) => return, // best-effort: skip this pass
     }
     let Some(extraction) = parse_tracker_reply(&reply) else {
         return;

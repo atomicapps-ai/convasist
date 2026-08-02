@@ -12,13 +12,18 @@ mod conversations;
 mod embed;
 mod hud;
 mod llm;
+mod metering;
 mod models;
 mod rag;
 mod recorder;
+mod rehearsal;
 mod secrets;
 mod session;
+mod simcon;
 mod tracker;
+mod tts;
 mod vad_silero;
+mod web;
 
 use std::fs;
 use std::sync::Mutex;
@@ -32,9 +37,11 @@ use conva_core::asr::TranscriptSegment;
 use conva_core::audio::AudioDevice;
 use conva_core::config::AppConfig;
 use conva_core::ipc::{events, AllyChunkEvent, AllySource, AllySourcesEvent, SessionStateEvent};
-use conva_core::llm::{provider_registry, ModelInfo, ProviderId, ProviderInfo};
+use conva_core::llm::{provider_registry, LlmRequest, ModelInfo, ProviderId, ProviderInfo};
+use conva_core::metering::{UsageLedger, UsageSummary};
 use conva_core::prompt::{build_ally_request, AllyKind};
 use conva_core::rag::{IngestReport, RagDocument};
+use conva_core::simcon::{KnowledgeProfile, SimConSession, SimConSummary};
 
 use rag::RagStore;
 use session::SessionManager;
@@ -44,6 +51,8 @@ struct AppState {
     config: Mutex<AppConfig>,
     session: SessionManager,
     rag: Arc<RagStore>,
+    /// Usage ledger (LLM tokens + Tavily searches), mirrored to usage.json.
+    usage: Mutex<UsageLedger>,
 }
 
 fn config_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
@@ -571,6 +580,309 @@ fn conversation_delete(app: AppHandle, id: String) -> Result<(), String> {
     conversations::delete(&app, &id).map_err(|e| e.to_string())
 }
 
+/// Create or update a SimCon (Simulated Conversation). An empty `id` mints a
+/// new record; an existing id updates in place.
+#[tauri::command]
+fn simcon_save(app: AppHandle, session: SimConSession) -> Result<SimConSession, String> {
+    simcon::save(&app, session).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn simcon_list(app: AppHandle) -> Result<Vec<SimConSummary>, String> {
+    simcon::list(&app).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn simcon_load(app: AppHandle, id: String) -> Result<SimConSession, String> {
+    simcon::load(&app, &id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn simcon_delete(app: AppHandle, id: String) -> Result<(), String> {
+    simcon::delete(&app, &id).map_err(|e| e.to_string())
+}
+
+/// Copy documents into a Sim Con's folder (named after its title); returns the
+/// new paths for the caller to ingest into the RAG library.
+#[tauri::command]
+fn simcon_store_docs(
+    app: AppHandle,
+    title: String,
+    paths: Vec<String>,
+) -> Result<Vec<String>, String> {
+    simcon::store_docs(&app, &title, paths).map_err(|e| e.to_string())
+}
+
+/// Build the reusable KnowledgeProfile (attached docs + web research) and mark
+/// the Sim Con ready.
+#[tauri::command]
+fn simcon_prepare(app: AppHandle, id: String) -> Result<SimConSession, String> {
+    simcon::prepare(&app, &id).map_err(|e| e.to_string())
+}
+
+/// Load a Sim Con's KnowledgeProfile so the UI can show what grounds the
+/// rehearsal — attached documents and the sources Ally researched.
+#[tauri::command]
+fn simcon_load_profile(app: AppHandle, profile_id: String) -> Result<KnowledgeProfile, String> {
+    simcon::load_profile(&app, &profile_id).map_err(|e| e.to_string())
+}
+
+/// Generate an **Ally prep dossier**: synthesize the Sim Con's documents + web
+/// research into a Markdown briefing, save it to the library (so it's viewable +
+/// reusable + grounds future answers), and attach it to the knowledge profile.
+/// Regenerating replaces the previous dossier. Returns the updated session.
+#[tauri::command]
+fn simcon_generate_dossier(
+    app: AppHandle,
+    state: State<AppState>,
+    id: String,
+) -> Result<SimConSession, String> {
+    let mut session = simcon::load(&app, &id).map_err(|e| e.to_string())?;
+    let profile_id = session
+        .knowledge_profile_id
+        .clone()
+        .ok_or_else(|| "Prepare this Sim Con before generating a prep document.".to_string())?;
+    let mut profile = simcon::load_profile(&app, &profile_id).map_err(|e| e.to_string())?;
+
+    // Broad grounding across this Sim Con's own knowledge base.
+    let mut query = format!("{} {}", session.title, session.purpose);
+    if let Some(jd) = &session.job_description {
+        query.push(' ');
+        query.push_str(jd);
+    }
+    let chunks = if query.trim().is_empty() {
+        Vec::new()
+    } else {
+        state
+            .rag
+            .retrieve_scoped(query.trim(), 24, &profile.doc_ids)
+    };
+
+    let selection = state
+        .config
+        .lock()
+        .expect("config lock")
+        .llm_quality
+        .clone();
+    let key = resolve_key(selection.provider)?;
+    let request = conva_core::simcon::dossier_prompt(&session, &profile.research, &chunks, 1200);
+    let mut buf = String::new();
+    let usage = llm::stream_completion(
+        selection.provider,
+        &key,
+        &selection.model,
+        &request,
+        &mut |t| buf.push_str(t),
+    )
+    .map_err(|e| e.to_string())?;
+    metering::record_llm(&app, selection.provider, usage);
+    let text = buf.trim().to_string();
+    if text.is_empty() {
+        return Err("Ally returned an empty briefing.".into());
+    }
+
+    // Replace any previous dossier so regenerating doesn't pile up copies.
+    if let Some(old) = session.dossier_doc_id.take() {
+        let _ = state.rag.delete(&old);
+        profile.doc_ids.retain(|d| d != &old);
+    }
+
+    let name = format!("{} — Ally prep", session.title.trim());
+    let report = state
+        .rag
+        .ingest_text(&name, &text)
+        .map_err(|e| e.to_string())?;
+    let doc_id = report.document.id.clone();
+
+    if !profile.doc_ids.contains(&doc_id) {
+        profile.doc_ids.push(doc_id.clone());
+    }
+    profile.updated_at_unix_ms = session::now_unix_ms();
+    simcon::save_profile(&app, &profile).map_err(|e| e.to_string())?;
+
+    session.dossier_doc_id = Some(doc_id);
+    simcon::save(&app, session).map_err(|e| e.to_string())
+}
+
+/// Reconstruct a library document's text (for showing the Ally prep dossier
+/// inline). Returns null if the id isn't found.
+#[tauri::command]
+fn rag_document_text(state: State<AppState>, id: String) -> Option<String> {
+    state.rag.document_text(&id)
+}
+
+/// Generate 3 counterparty personas (Step 3) with the configured LLM, grounded
+/// in the Sim Con's goal / type / job description. Overwrites any existing
+/// personas and clears the current choice.
+#[tauri::command]
+fn simcon_generate_personas(
+    app: AppHandle,
+    state: State<AppState>,
+    id: String,
+) -> Result<SimConSession, String> {
+    let mut session = simcon::load(&app, &id).map_err(|e| e.to_string())?;
+    let selection = state
+        .config
+        .lock()
+        .expect("config lock")
+        .llm_quality
+        .clone();
+    let key = resolve_key(selection.provider)?;
+    let (system, user) = conva_core::simcon::persona_prompt(&session);
+    let request = LlmRequest {
+        system,
+        user,
+        max_tokens: 1500,
+    };
+    let mut buf = String::new();
+    let usage = llm::stream_completion(
+        selection.provider,
+        &key,
+        &selection.model,
+        &request,
+        &mut |t| buf.push_str(t),
+    )
+    .map_err(|e| e.to_string())?;
+    metering::record_llm(&app, selection.provider, usage);
+    session.personas = conva_core::simcon::parse_personas(&buf);
+    session.chosen_persona_id = None;
+    simcon::save(&app, session).map_err(|e| e.to_string())
+}
+
+/// Record the persona the user will rehearse against (Step 3).
+#[tauri::command]
+fn simcon_choose_persona(
+    app: AppHandle,
+    id: String,
+    persona_id: String,
+) -> Result<SimConSession, String> {
+    let mut session = simcon::load(&app, &id).map_err(|e| e.to_string())?;
+    session.chosen_persona_id = Some(persona_id);
+    simcon::save(&app, session).map_err(|e| e.to_string())
+}
+
+/// Start a live rehearsal (Step 4): mic-only capture, and a worker that plays
+/// the chosen persona — STT → in-character LLM reply (grounded in the knowledge
+/// base) → Aura TTS. Requires a chosen persona and a prepared knowledge profile.
+/// Stop it with the normal `stop_session`. Returns the session id.
+#[tauri::command]
+async fn simcon_start_rehearsal(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<String, String> {
+    let session = simcon::load(&app, &id).map_err(|e| e.to_string())?;
+
+    // Preconditions: a chosen persona and a prepared knowledge profile.
+    let persona = session
+        .chosen_persona_id
+        .as_ref()
+        .and_then(|pid| session.personas.iter().find(|p| &p.id == pid).cloned())
+        .ok_or_else(|| "Choose a persona before starting the rehearsal.".to_string())?;
+    let profile_id = session
+        .knowledge_profile_id
+        .clone()
+        .ok_or_else(|| "Prepare this Sim Con before starting the rehearsal.".to_string())?;
+    let profile = simcon::load_profile(&app, &profile_id).map_err(|e| e.to_string())?;
+
+    let config = state.config.lock().expect("config lock").clone();
+    if !config.consent_acknowledged {
+        return Err("consent_required".into());
+    }
+
+    let selection = config.llm_quality.clone();
+    let llm_key = resolve_key(selection.provider)?;
+    // Aura reuses the Deepgram key; without one the rehearsal is text-only.
+    let tts_key = asr_deepgram::load_api_key();
+
+    let rag = state.rag.clone();
+    let simcon_title = session.title.clone();
+    let (reh_tx, reh_rx) = std::sync::mpsc::channel();
+    let (session_id, stop_flag, force_end) = state
+        .session
+        .start_rehearsal(&app, &config, rag.clone(), reh_tx, simcon_title)
+        .map_err(|e| e.to_string())?;
+
+    let ctx = rehearsal::RehearsalContext {
+        selection,
+        llm_key,
+        tts_key,
+        session,
+        profile,
+        persona,
+        session_start_ms: state.session.session_started_ms(),
+    };
+    rehearsal::spawn(app.clone(), rag, reh_rx, stop_flag, force_end, ctx);
+    Ok(session_id)
+}
+
+/// End the user's current rehearsal turn immediately (manual "your turn"); the
+/// worker also auto-ends the turn after a pause.
+#[tauri::command]
+fn simcon_rehearsal_your_turn(state: State<AppState>) {
+    state.session.rehearsal_your_turn();
+}
+
+/// Inject a typed turn (e.g. an Ally-suggested answer the user chose to "use")
+/// as if the user spoke it: show it in the transcript and hand it to the
+/// counterparty, who then responds. Errors if no rehearsal is active.
+#[tauri::command]
+fn simcon_rehearsal_say(
+    app: AppHandle,
+    state: State<AppState>,
+    text: String,
+) -> Result<(), String> {
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        return Ok(());
+    }
+    let now = session::now_unix_ms();
+    let ts = now.saturating_sub(state.session.session_started_ms());
+    let segment = TranscriptSegment {
+        side: conva_core::audio::StreamSide::Outbound,
+        // Epoch-ms seq — unique and far above the engine's small per-run seqs.
+        seq: now,
+        text,
+        is_final: true,
+        start_ms: ts,
+        end_ms: ts,
+        confidence: None,
+        latency_ms: 0,
+    };
+    // Show it as the user's turn immediately + log it (bypasses the sink).
+    let _ = app.emit(events::TRANSCRIPT_SEGMENT, segment.clone());
+    state.session.log_segment(&segment);
+    if state.session.rehearsal_inject_turn(segment) {
+        Ok(())
+    } else {
+        Err("No rehearsal is running.".into())
+    }
+}
+
+/// Store (empty clears) the Tavily web-research key in the OS vault.
+#[tauri::command]
+fn set_tavily_key(key: String) -> Result<(), String> {
+    simcon::store_tavily_key(&key).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn tavily_key_status() -> bool {
+    simcon::load_tavily_key().is_some()
+}
+
+/// Usage snapshot for Settings → Usage: LLM tokens per provider + Tavily
+/// searches, with running totals.
+#[tauri::command]
+fn usage_summary(app: AppHandle) -> UsageSummary {
+    metering::summary(&app)
+}
+
+/// Clear all usage counters; returns the emptied snapshot.
+#[tauri::command]
+fn usage_reset(app: AppHandle) -> UsageSummary {
+    metering::reset(&app)
+}
+
 /// Copy every library document's original into the repo `library/` folder so
 /// committing it carries the library to other machines (git-synced library).
 #[tauri::command]
@@ -635,6 +947,63 @@ fn retrieval_query(question: Option<&str>, segments: &[TranscriptSegment]) -> St
         .join(" ")
 }
 
+/// The tool schema offered to Ally on the Anthropic path: a single, sparingly
+/// used web search. The description does the gating — the model must only reach
+/// for it when its own knowledge and the user's documents fall short.
+fn ally_web_tools() -> serde_json::Value {
+    serde_json::json!([{
+        "name": "web_search",
+        "description": "Search the web for CURRENT, real-time, or niche facts \
+            that are not in the user's reference material and that you cannot \
+            answer confidently from your own knowledge (e.g. today's prices, \
+            recent news, live rankings, very specific figures). Do NOT use it \
+            for general knowledge you already have, and do NOT announce or \
+            narrate that you are searching — just fold the results into a \
+            concise answer.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "A focused search query."}
+            },
+            "required": ["query"]
+        }
+    }])
+}
+
+/// Execute an Ally tool call. Today the only tool is `web_search` (Tavily); each
+/// executed query is one billed search, recorded in the usage meter.
+fn run_web_tool(app: &AppHandle, name: &str, input: &serde_json::Value) -> String {
+    if name != "web_search" {
+        return format!("Unknown tool: {name}");
+    }
+    let query = input
+        .get("query")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    if query.is_empty() {
+        return "No query provided.".into();
+    }
+    let Some(key) = simcon::load_tavily_key() else {
+        return "Web search is unavailable: no Tavily key is configured.".into();
+    };
+    match web::tavily_search(&key, query, 3) {
+        Ok(sources) => {
+            // A successful request is billed by Tavily whether or not it matched.
+            metering::record_tavily_search(app, 1);
+            if sources.is_empty() {
+                return "No results found.".into();
+            }
+            let mut out = String::new();
+            for s in &sources {
+                out.push_str(&format!("- {} ({})\n  {}\n", s.title, s.url, s.snippet));
+            }
+            out
+        }
+        Err(e) => format!("Web search failed: {e}"),
+    }
+}
+
 /// Manual Ally (U4/O2): retrieves grounding chunks (R4), builds the
 /// context, and streams the answer back as ALLY_CHUNK events. Returns
 /// immediately.
@@ -692,15 +1061,42 @@ fn ally(
                     },
                 );
             };
-            let result = llm::stream_completion(
-                selection.provider,
-                &key,
-                &selection.model,
-                &request,
-                &mut |token| emit(token, false, None),
-            );
+            // Web search is offered to Ally only when the default provider
+            // (Anthropic) is active AND a Tavily key exists. The model decides
+            // whether to call it, so cost is incurred only on queries that
+            // genuinely need fresh/external facts — general knowledge and
+            // document questions stay a single request.
+            let web_enabled =
+                selection.provider == ProviderId::Anthropic && simcon::load_tavily_key().is_some();
+
+            let result = if web_enabled {
+                let tools = ally_web_tools();
+                let mut run_tool = |name: &str, input: &serde_json::Value| -> String {
+                    run_web_tool(&app, name, input)
+                };
+                llm::anthropic_stream_with_tools(
+                    &key,
+                    &selection.model,
+                    &request,
+                    &tools,
+                    &mut |token| emit(token, false, None),
+                    &mut run_tool,
+                    2,
+                )
+            } else {
+                llm::stream_completion(
+                    selection.provider,
+                    &key,
+                    &selection.model,
+                    &request,
+                    &mut |token| emit(token, false, None),
+                )
+            };
             match result {
-                Ok(()) => emit("", true, None),
+                Ok(usage) => {
+                    metering::record_llm(&app, selection.provider, usage);
+                    emit("", true, None)
+                }
                 Err(e) => emit("", true, Some(e.to_string())),
             }
         })
@@ -809,10 +1205,12 @@ pub fn run() {
             // the first session (falls back to the energy gate until it lands).
             let _ = models::ensure_silero(app.handle());
 
+            let usage = metering::load(app.handle());
             app.manage(AppState {
                 config: Mutex::new(config),
                 session: SessionManager::new(),
                 rag,
+                usage: Mutex::new(usage),
             });
 
             // Account sign-in return path: catch conva://auth/… deep links,
@@ -916,6 +1314,24 @@ pub fn run() {
             conversation_list,
             conversation_load,
             conversation_delete,
+            simcon_save,
+            simcon_list,
+            simcon_load,
+            simcon_delete,
+            simcon_store_docs,
+            simcon_prepare,
+            simcon_load_profile,
+            simcon_generate_dossier,
+            rag_document_text,
+            simcon_generate_personas,
+            simcon_choose_persona,
+            simcon_start_rehearsal,
+            simcon_rehearsal_your_turn,
+            simcon_rehearsal_say,
+            set_tavily_key,
+            tavily_key_status,
+            usage_summary,
+            usage_reset,
             rag_sync_library,
             open_hud,
             close_hud,

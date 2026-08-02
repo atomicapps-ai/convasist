@@ -878,6 +878,7 @@ dependencies = [
  "hound",
  "keyring",
  "log",
+ "objc2",
  "ort",
  "pdf-extract",
  "rand 0.8.7",
@@ -896,6 +897,7 @@ dependencies = [
  "ureq",
  "urlencoding",
  "whisper-rs",
+ "windows 0.61.3",
  "zip 2.4.2",
 ]
 

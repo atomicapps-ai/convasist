@@ -437,22 +437,62 @@ impl RagStore {
     /// BM25 when the embedder (or a chunk's vector) is unavailable. All
     /// in-memory — microseconds at library scale (§2.5 <15 ms budget).
     pub fn retrieve(&self, query: &str, k: usize) -> Vec<ScoredChunk> {
+        self.retrieve_filtered(query, k, None)
+    }
+
+    /// Like [`retrieve`], but restricted to a set of document ids (a Sim Con's
+    /// KnowledgeProfile). An empty scope means "whole library" — so a Sim Con
+    /// with no attached docs still grounds on everything available.
+    pub fn retrieve_scoped(&self, query: &str, k: usize, doc_ids: &[String]) -> Vec<ScoredChunk> {
+        if doc_ids.is_empty() {
+            self.retrieve_filtered(query, k, None)
+        } else {
+            self.retrieve_filtered(query, k, Some(doc_ids))
+        }
+    }
+
+    fn retrieve_filtered(
+        &self,
+        query: &str,
+        k: usize,
+        scope: Option<&[String]>,
+    ) -> Vec<ScoredChunk> {
         let inner = self.inner.read().expect("rag lock");
         let Some(index) = &inner.index else {
             return Vec::new();
         };
 
-        let pool = k * 3;
+        // When scoped, the set of entry indices whose document is in scope.
+        let allowed: Option<std::collections::HashSet<usize>> = scope.map(|ids| {
+            let want: std::collections::HashSet<&str> = ids.iter().map(|s| s.as_str()).collect();
+            inner
+                .entries
+                .iter()
+                .enumerate()
+                .filter_map(|(i, entry)| {
+                    let doc = inner.documents.get(entry.document_index)?;
+                    want.contains(doc.document.id.as_str()).then_some(i)
+                })
+                .collect()
+        });
+        let keep = |entry: &usize| allowed.as_ref().is_none_or(|a| a.contains(entry));
+
+        // Widen the candidate pool when scoped so filtering still yields k.
+        let pool = if allowed.is_some() { k * 12 } else { k * 3 };
         let lexical: Vec<usize> = index
             .search(query, pool)
             .into_iter()
             .map(|(entry, _)| entry)
+            .filter(|e| keep(e))
             .collect();
 
         let semantic: Option<Vec<usize>> = crate::embed::embed_query(query).map(|qvec| {
             conva_core::fuse::top_k_cosine(
                 &qvec,
                 inner.entries.iter().enumerate().filter_map(|(i, entry)| {
+                    if !keep(&i) {
+                        return None;
+                    }
                     let doc = inner.documents.get(entry.document_index)?;
                     let chunk = doc.chunks.get(entry.chunk_index)?;
                     Some((i, chunk.embedding.as_slice()))
@@ -486,6 +526,20 @@ impl RagStore {
                 })
             })
             .collect()
+    }
+
+    /// Reconstruct a document's full text (its chunks joined) — used to show an
+    /// Ally-generated prep document inline.
+    pub fn document_text(&self, id: &str) -> Option<String> {
+        let inner = self.inner.read().expect("rag lock");
+        let doc = inner.documents.iter().find(|d| d.document.id == id)?;
+        Some(
+            doc.chunks
+                .iter()
+                .map(|c| c.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
     }
 
     /// Embed chunks that were ingested before the model was ready (runs on

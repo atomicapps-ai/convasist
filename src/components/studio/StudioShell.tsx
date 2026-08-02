@@ -7,6 +7,8 @@ import { FeaturesView } from "@/components/product/FeaturesView";
 import { WhatsComingView } from "@/components/product/WhatsComingView";
 import { PreparingOverlay } from "@/components/PreparingOverlay";
 import { ProfileView } from "@/components/profile/ProfileView";
+import { RehearsalBar } from "@/components/simcon/RehearsalBar";
+import { SimConView } from "@/components/simcon/SimConView";
 import { GateView, useAccessGate } from "@/components/web/GateView";
 import { RagPanel } from "@/components/RagPanel";
 import { SaveConversationDialog } from "@/components/SaveConversationDialog";
@@ -81,6 +83,7 @@ export function StudioShell() {
                 {view === "conversations" && (
                   <ConversationsPanel onClose={backToLive} />
                 )}
+                {view === "simcon" && <SimConView />}
               </>
             )}
           </main>
@@ -105,6 +108,7 @@ export function StudioShell() {
       )}
 
       {/* Overlays — render above any view. */}
+      <RehearsalBar />
       <ConsentGate />
       <PreparingOverlay />
       <SaveConversationDialog />

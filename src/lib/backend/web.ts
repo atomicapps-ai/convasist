@@ -24,6 +24,9 @@ import type {
   AuthStatus,
   Conversation,
   ConversationSummary,
+  KnowledgeProfile,
+  SimConSession,
+  SimConSummary,
   IngestReport,
   ModelInfo,
   ProviderInfo,
@@ -32,6 +35,7 @@ import type {
   SecretsStatus,
   SessionSummary,
   TranscriptSegment,
+  UsageSummary,
   WhisperModelInfo,
 } from "@/lib/ipc";
 
@@ -126,6 +130,7 @@ export class WebBackend implements ConvaBackend {
     download: (): Promise<void> => unsupported("rag.download (file path)"),
     syncLibrary: (): Promise<string> => unsupported("rag.syncLibrary (git)"),
     analyzeTerms: (): Promise<string[]> => Promise.resolve([]),
+    documentText: (): Promise<string | null> => todo("GET /v1/library/:id/text"),
   };
 
   secrets = {
@@ -160,6 +165,38 @@ export class WebBackend implements ConvaBackend {
     list: (): Promise<ConversationSummary[]> => todo("GET /v1/conversations"),
     load: (): Promise<Conversation> => todo("GET /v1/conversations/:id"),
     delete: (): Promise<void> => todo("DELETE /v1/conversations/:id"),
+  };
+
+  simcon = {
+    save: (): Promise<SimConSession> => todo("POST /v1/simcon"),
+    list: (): Promise<SimConSummary[]> => todo("GET /v1/simcon"),
+    load: (): Promise<SimConSession> => todo("GET /v1/simcon/:id"),
+    delete: (): Promise<void> => todo("DELETE /v1/simcon/:id"),
+    storeDocs: (): Promise<string[]> =>
+      unsupported("simcon.storeDocs (local file paths)"),
+    prepare: (): Promise<SimConSession> => todo("POST /v1/simcon/:id/prepare"),
+    loadProfile: (): Promise<KnowledgeProfile> =>
+      todo("GET /v1/simcon/profiles/:id"),
+    generateDossier: (): Promise<SimConSession> =>
+      todo("POST /v1/simcon/:id/dossier"),
+    generatePersonas: (): Promise<SimConSession> =>
+      todo("POST /v1/simcon/:id/personas"),
+    choosePersona: (): Promise<SimConSession> =>
+      todo("PATCH /v1/simcon/:id/persona"),
+    startRehearsal: (): Promise<string> =>
+      unsupported("simcon.startRehearsal (desktop audio)"),
+    rehearsalYourTurn: (): Promise<void> =>
+      unsupported("simcon.rehearsalYourTurn (desktop audio)"),
+    rehearsalSay: (): Promise<void> =>
+      unsupported("simcon.rehearsalSay (desktop audio)"),
+    setResearchKey: (): Promise<void> =>
+      unsupported("simcon.setResearchKey (server-side on web)"),
+    researchKeyStatus: () => Promise.resolve(false),
+  };
+
+  usage = {
+    summary: (): Promise<UsageSummary> => todo("GET /v1/usage"),
+    reset: (): Promise<UsageSummary> => todo("POST /v1/usage/reset"),
   };
 
   sessions = {

@@ -15,6 +15,7 @@ import type {
   AuthChangedEvent,
   ModelStatusEvent,
   RadarEvent,
+  RehearsalStateEvent,
   SessionStateEvent,
   TrackerEvent,
   TranscriptSegment,
@@ -30,6 +31,7 @@ export interface EventMap {
   radar: RadarEvent;
   tracker: TrackerEvent;
   authChanged: AuthChangedEvent;
+  rehearsalState: RehearsalStateEvent;
 }
 
 /** Handle returned by `subscribe`; call to stop receiving the event. */
@@ -49,4 +51,5 @@ export const EVENT_CHANNEL: Record<keyof EventMap, string> = {
   radar: "conva://radar",
   tracker: "conva://tracker",
   authChanged: "conva://auth-changed",
+  rehearsalState: "conva://rehearsal-state",
 };
